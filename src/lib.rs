@@ -1,14 +1,7 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-}
+#![forbid(unsafe_code)]
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+//! This crate contains all the necessary types, methods, functions and traits to work with cards, decks and card games.
+pub mod briscola;
+/// This module contains the description of the domain.
+pub mod cards;
+pub mod tressette;
