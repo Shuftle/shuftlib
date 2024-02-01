@@ -8,6 +8,9 @@ path = "src/lib.rs"
 
 [dependencies]
 rand="0.8"
-strum = {version="0.25", features=["derive"]}
+strum = {version="0.25", default-features=false, features=["derive"]}
 
 [dev-dependencies]
+
+[lints]
+workspace = true

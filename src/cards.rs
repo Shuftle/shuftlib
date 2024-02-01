@@ -30,7 +30,6 @@ impl ItalianCard {
     }
 }
 
-
 impl Card for ItalianCard {}
 
 /// Representation of a card that goes into an French deck.
@@ -201,7 +200,6 @@ impl Deck<FrenchCard> {
 }
 
 impl<T: Card> Deck<T> {
-
     /// Performs a random permutation on the deck with the Fisher–Yates shuffle algorithm, repeated 10 times.
     pub fn shuffle(&mut self) {
         let mut rng = rand::thread_rng();
@@ -282,7 +280,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::cards::{Deck};
+    use crate::cards::Deck;
 
     #[test]
     fn should_shuffle() {
@@ -293,9 +291,8 @@ mod tests {
 
         let decks = sorted_deck.cards.iter().zip(shuffled_deck.cards.iter());
 
-        let count_of_different_cards = decks.filter( |(&card1, &card2)| card1 != card2 ).count();
+        let count_of_different_cards = decks.filter(|(&card1, &card2)| card1 != card2).count();
 
         assert_ne!(count_of_different_cards, 0);
-
     }
 }
