@@ -2,6 +2,14 @@
 name = "shuftlib"
 version = "0.1.0"
 edition = "2021"
+authors = ["Sebastiano Giordano"]
+categories = ["encoding", "no-std", "no-std::no-alloc"]
+description = "A generic library for card games and related topics"
+documentation = "https://docs.rs/shuftlib"
+keywords = ["cards", "card_games"]
+license = "MIT OR Apache-2.0"
+readme = "crates-io.md"
+repository = "https://github.com/shuftle/shuftlib"
 
 [lib]
 path = "src/lib.rs"
