@@ -1,13 +1,16 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    fmt::{Debug, Display},
+    ops::{Deref, DerefMut},
+};
 
 use rand::Rng;
-use strum::{EnumCount, EnumIter, IntoEnumIterator};
+use strum::{EnumIter, FromRepr, IntoEnumIterator};
 
 /// A trait representing a card. The actual implementation depends on the game where this is used.
-pub trait Card {}
+pub trait Card: Display + Default + Sized + Debug + Copy + Eq + PartialEq {}
 
 /// Representation of a card that goes into an Italian deck.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ItalianCard {
     rank: ItalianRank,
     suit: Suit,
@@ -30,8 +33,24 @@ impl ItalianCard {
     }
 }
 
+impl Default for ItalianCard {
+    fn default() -> Self {
+        ItalianCard {
+            rank: ItalianRank::Ace,
+            suit: Suit::Clubs,
+        }
+    }
+}
+
+impl Display for ItalianCard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.rank as u8, self.suit)
+    }
+}
+
 impl Card for ItalianCard {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Representation of a card that goes into an French deck.
 pub struct FrenchCard {
     rank: FrenchRank,
@@ -55,14 +74,37 @@ impl FrenchCard {
     }
 }
 
+impl Default for FrenchCard {
+    fn default() -> Self {
+        FrenchCard {
+            rank: FrenchRank::Ace,
+            suit: Suit::Hearts,
+        }
+    }
+}
+
+impl Display for FrenchCard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.rank as u8, self.suit)
+    }
+}
+
 impl Card for FrenchCard {}
 
 /// A Joker card, present in some card games. Its function depends on the game.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Joker;
 
 impl Card for Joker {}
 
+impl Display for Joker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "JK")
+    }
+}
+
 /// A variant of the French card, which can either be an actual French card or a joker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrenchWithJoker {
     /// A standard French card.
     Normal(FrenchCard),
@@ -71,12 +113,31 @@ pub enum FrenchWithJoker {
 }
 impl Card for FrenchWithJoker {}
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, EnumIter, EnumCount)]
+impl Default for FrenchWithJoker {
+    fn default() -> Self {
+        Self::Normal(FrenchCard {
+            rank: FrenchRank::Ace,
+            suit: Suit::Hearts,
+        })
+    }
+}
+
+impl Display for FrenchWithJoker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FrenchWithJoker::Normal(c) => write!(f, "{}", c),
+            FrenchWithJoker::Joker(c) => write!(f, "{}", c),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, EnumIter, FromRepr, Hash)]
+#[repr(u8)]
 /// The rank of the card. In an Italian deck, ranks go from the ace to the 7, then they also have a jack, knight and king,
 /// In most games they each have a different value that depends on the game itself.
 pub enum ItalianRank {
     /// 1
-    Ace,
+    Ace = 1,
     /// 2
     Two,
     /// 3
@@ -97,12 +158,13 @@ pub enum ItalianRank {
     King,
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, EnumIter, EnumCount)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, EnumIter, FromRepr, Hash)]
+#[repr(u8)]
 /// The rank of the card. In a French deck, ranks go from the ace to 10, then there is a jack, queen and king,
 /// In most games they each have a different value that depends on the game itself.
 pub enum FrenchRank {
     /// 1
-    Ace,
+    Ace = 1,
     /// 2
     Two,
     /// 3
@@ -129,7 +191,7 @@ pub enum FrenchRank {
     King,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, Hash)]
 /// The 4 suits of a standard deck. They have an equivalent in pretty much all regional decks.
 /// In some games they have a hierarchical order.
 pub enum Suit {
@@ -141,6 +203,18 @@ pub enum Suit {
     Clubs,
     /// Spades or Pikes (French), Leaves (German), Swords (Latin).
     Spades,
+}
+
+impl Display for Suit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Suit::Hearts => "H",
+            Suit::Diamonds => "D",
+            Suit::Clubs => "C",
+            Suit::Spades => "S",
+        };
+        write!(f, "{}", s)
+    }
 }
 
 #[derive(Default)]
@@ -280,7 +354,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::cards::Deck;
+    use crate::common::cards::Deck;
 
     #[test]
     fn should_shuffle() {
