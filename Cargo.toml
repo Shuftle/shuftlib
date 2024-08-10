@@ -16,11 +16,26 @@ strum = {version="0.25", default-features=false, features=["derive"]}
 [dev-dependencies]
 proptest="1.4"
 
-[lints]
-workspace = true
-
 [profile.test.package.proptest]
 opt-level = 3
 
 [profile.test.package.rand_chacha]
 opt-level = 3
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_in_result = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+panic_in_result_fn = "warn"
+float_cmp = "warn"
+float_cmp_const = "warn"
+missing_panics_doc = "warn"
+missing_errors_doc = "warn"
+todo = "warn"
+cast_lossless = "warn"
+cognitive_complexity = "warn"

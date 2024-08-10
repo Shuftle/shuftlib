@@ -1,0 +1,10 @@
+# Rust
+/target
+
+# IDEs
+.vscode
+.idea
+.helix
+
+# Direnv
+/.direnv
