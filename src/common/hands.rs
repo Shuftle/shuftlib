@@ -4,6 +4,9 @@ use anyhow::bail;
 
 use super::cards::Card;
 
+const PLAYERS: usize = 4;
+const TRICKS: usize = 10;
+
 /// Many of the types contained in  this module are generic over certain
 /// constants related to the game. This trait is the summary of these
 /// constraints.
@@ -22,9 +25,9 @@ pub trait TrickTakingGame {
     /// have been played and it can depend by the order in which the players
     /// played their cards.
     fn determine_taker(
-        cards: &[Self::CardType; Self::PLAYERS],
-        first_to_play: PlayerId<{ Self::PLAYERS }>,
-    ) -> PlayerId<{ Self::PLAYERS }>;
+        cards: &[Self::CardType; PLAYERS],
+        first_to_play: PlayerId<{ PLAYERS }>,
+    ) -> PlayerId<{ PLAYERS }>;
 }
 
 /// Represents a player of a game. This type is generic over the type of the
@@ -33,18 +36,18 @@ pub trait TrickTakingGame {
 pub struct Player<G>
 where
     G: TrickTakingGame,
-    [(); G::PLAYERS]:,
+    [(); PLAYERS]:,
 {
     /// The cards traditionally held in the hand by the player.
     hand: Vec<G::CardType>,
     /// The ID of this player. This is used to determine their turn to play.
-    id: PlayerId<{ G::PLAYERS }>,
+    id: PlayerId<{ PLAYERS }>,
 }
 
 impl<G> Player<G>
 where
     G: TrickTakingGame,
-    [(); G::PLAYERS]:,
+    [(); PLAYERS]:,
 {
     /// Adds a card to the hand of the player.
     ///
@@ -97,7 +100,7 @@ where
     }
 
     /// Getter for the id of this player.
-    pub fn id(&self) -> PlayerId<{ G::PLAYERS }> {
+    pub fn id(&self) -> PlayerId<{ PLAYERS }> {
         self.id
     }
 
@@ -115,7 +118,7 @@ where
     /// assert_eq!(*player.id(), 0);
     /// assert_eq!(player.hand().len(), 0);
     /// ````
-    pub fn new(id: PlayerId<{ G::PLAYERS }>) -> Self {
+    pub fn new(id: PlayerId<{ PLAYERS }>) -> Self {
         Self {
             id,
             hand: Vec::new(),
@@ -137,7 +140,6 @@ impl<const PLAYERS: usize> PlayerId<PLAYERS> {
     ///
     /// # Examples
     /// ```
-    /// #![feature(generic_const_exprs)]
     /// use shuftlib::common::hands::PlayerId;
     ///
     /// let mut player_id: PlayerId<4>= PlayerId::new(0).unwrap();
@@ -214,16 +216,16 @@ impl<const PLAYERS: usize> Deref for PlayerId<PLAYERS> {
 pub struct Trick<G>
 where
     G: TrickTakingGame,
-    [(); G::PLAYERS]:,
+    [(); PLAYERS]:,
 {
-    cards: [G::CardType; G::PLAYERS],
-    taker: PlayerId<{ G::PLAYERS }>,
+    cards: [G::CardType; PLAYERS],
+    taker: PlayerId<{ PLAYERS }>,
 }
 
 impl<G> Display for Trick<G>
 where
     G: TrickTakingGame,
-    [(); G::PLAYERS]:,
+    [(); PLAYERS]:,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -237,7 +239,7 @@ where
 impl<G> Trick<G>
 where
     G: TrickTakingGame,
-    [(); G::PLAYERS]:,
+    [(); PLAYERS]:,
 {
     /// Returns the card this trick has been won with.
     pub fn taken_with(&self) -> G::CardType {
@@ -245,7 +247,7 @@ where
     }
 
     /// Getter for the `PlayerId` of the player who won the trick.
-    pub fn taker(&self) -> PlayerId<{ G::PLAYERS }> {
+    pub fn taker(&self) -> PlayerId<{ PLAYERS }> {
         self.taker
     }
 
@@ -261,20 +263,20 @@ where
 pub struct OngoingTrick<G>
 where
     G: TrickTakingGame,
-    [(); G::PLAYERS]:,
+    [(); PLAYERS]:,
 {
-    cards: [Option<G::CardType>; G::PLAYERS],
-    first_to_play: PlayerId<{ G::PLAYERS }>,
-    next_to_play: PlayerId<{ G::PLAYERS }>,
+    cards: [Option<G::CardType>; PLAYERS],
+    first_to_play: PlayerId<{ PLAYERS }>,
+    next_to_play: PlayerId<{ PLAYERS }>,
     play_count: usize,
 }
 
 impl<G> Deref for OngoingTrick<G>
 where
     G: TrickTakingGame,
-    [(); G::PLAYERS]:,
+    [(); PLAYERS]:,
 {
-    type Target = [Option<G::CardType>; G::PLAYERS];
+    type Target = [Option<G::CardType>; PLAYERS];
 
     fn deref(&self) -> &Self::Target {
         &self.cards
@@ -284,7 +286,7 @@ where
 impl<G> OngoingTrick<G>
 where
     G: TrickTakingGame,
-    [(); G::PLAYERS]:,
+    [(); PLAYERS]:,
 {
     /// Adds the `Card` passed as parameter to the `OngoingTrick`.
     /// Checking the validity of the card played is a responsability of the
@@ -292,7 +294,6 @@ where
     ///
     /// # Examples
     /// ```
-    /// #![feature(generic_const_exprs)]
     /// use shuftlib::common::{hands::{OngoingTrick, PlayerId, TrickTakingGame}, cards::{Card, ItalianRank, Suit}};
     /// use shuftlib::tressette::{TressetteRules, TressetteCard};
     ///
@@ -326,7 +327,6 @@ where
     /// # Examples
     ///
     /// ```
-    /// #![feature(generic_const_exprs)]
     /// use shuftlib::common::{hands::{OngoingTrick, PlayerId, TrickTakingGame}, cards::{ItalianRank, Suit}};
     /// use shuftlib::tressette::{TressetteRules, TressetteCard};
     ///
@@ -357,7 +357,7 @@ where
     /// assert_eq!(Some(trick.taker()), PlayerId::<{TressetteRules::PLAYERS}>::new(2));
     /// ```
     pub fn finish(self) -> Option<Trick<G>> {
-        let mut cards: [G::CardType; G::PLAYERS] = [G::CardType::default(); G::PLAYERS];
+        let mut cards: [G::CardType; PLAYERS] = [G::CardType::default(); PLAYERS];
         if self
             .iter()
             .enumerate()
@@ -384,12 +384,12 @@ where
     }
 
     /// Getter for the id of the person who starts the trick.
-    pub fn first_to_play(&self) -> PlayerId<{ G::PLAYERS }> {
+    pub fn first_to_play(&self) -> PlayerId<{ PLAYERS }> {
         self.first_to_play
     }
 
     /// Getter for the id of the person who playes last in the trick.
-    pub fn next_to_play(&self) -> PlayerId<{ G::PLAYERS }> {
+    pub fn next_to_play(&self) -> PlayerId<{ PLAYERS }> {
         self.next_to_play
     }
 
@@ -408,11 +408,11 @@ where
     /// assert_eq!(ongoing_trick.first_to_play(), first_to_play);
     /// ongoing_trick.cards().iter().for_each(|&c| assert!(c.is_none()));
     /// ```
-    pub fn new(first_to_play: PlayerId<{ G::PLAYERS }>) -> Self {
+    pub fn new(first_to_play: PlayerId<{ PLAYERS }>) -> Self {
         let mut last_to_play = first_to_play;
-        (0..G::PLAYERS - 1).for_each(|_| last_to_play.inc());
+        (0..PLAYERS - 1).for_each(|_| last_to_play.inc());
         Self {
-            cards: [None; G::PLAYERS],
+            cards: [None; PLAYERS],
             first_to_play,
             next_to_play: first_to_play,
             play_count: 0,
@@ -429,20 +429,20 @@ where
 pub struct Hand<G>
 where
     G: TrickTakingGame,
-    [(); G::PLAYERS]:,
-    [(); G::TRICKS]:,
+    [(); PLAYERS]:,
+    [(); TRICKS]:,
 {
-    tricks: [Trick<G>; G::TRICKS],
+    tricks: [Trick<G>; TRICKS],
 }
 
 impl<G> Hand<G>
 where
     G: TrickTakingGame,
-    [(); G::PLAYERS]:,
-    [(); G::TRICKS]:,
+    [(); PLAYERS]:,
+    [(); TRICKS]:,
 {
     /// Returns a reference to the tricks of this [`Hand<G>`].
-    pub fn tricks(&self) -> &[Trick<G>; G::TRICKS] {
+    pub fn tricks(&self) -> &[Trick<G>; TRICKS] {
         &self.tricks
     }
 }
@@ -453,19 +453,19 @@ where
 pub struct OngoingHand<G>
 where
     G: TrickTakingGame,
-    [(); G::PLAYERS]:,
-    [(); G::TRICKS]:,
+    [(); PLAYERS]:,
+    [(); TRICKS]:,
 {
     current_trick: Option<OngoingTrick<G>>,
     index: usize,
-    tricks: [Option<Trick<G>>; G::TRICKS],
+    tricks: [Option<Trick<G>>; TRICKS],
 }
 
 impl<G> OngoingHand<G>
 where
     G: TrickTakingGame,
-    [(); G::PLAYERS]:,
-    [(); G::TRICKS]:,
+    [(); PLAYERS]:,
+    [(); TRICKS]:,
 {
     /// Returns the current trick of this [`OngoingHand<G>`].
     pub fn current_trick(&self) -> &Option<OngoingTrick<G>> {
@@ -473,7 +473,7 @@ where
     }
 
     /// Returns a reference to the tricks of this [`OngoingHand<G>`].
-    pub fn tricks(&self) -> &[Option<Trick<G>>; G::TRICKS] {
+    pub fn tricks(&self) -> &[Option<Trick<G>>; TRICKS] {
         &self.tricks
     }
 
@@ -489,7 +489,7 @@ where
             return None;
         }
 
-        let tricks: [Trick<G>; G::TRICKS] = self
+        let tricks: [Trick<G>; TRICKS] = self
             .tricks
             .into_iter()
             .flatten()
@@ -514,7 +514,7 @@ where
     /// ongoing_hand.tricks().iter().for_each(|t| assert!(t.is_none()));
     /// ```
     pub fn new() -> Self {
-        let tricks: [Option<Trick<G>>; G::TRICKS] = array_init::array_init(|_| None);
+        let tricks: [Option<Trick<G>>; TRICKS] = array_init::array_init(|_| None);
 
         let current_trick = None;
         let index = 0;
@@ -535,8 +535,8 @@ where
 impl<G> Default for OngoingHand<G>
 where
     G: TrickTakingGame,
-    [(); G::PLAYERS]:,
-    [(); G::TRICKS]:,
+    [(); PLAYERS]:,
+    [(); TRICKS]:,
 {
     fn default() -> Self {
         Self::new()
@@ -550,7 +550,7 @@ mod tests {
 
     use crate::common::cards::{ItalianCard, ItalianRank, Suit};
 
-    use super::{OngoingTrick, PlayerId, TrickTakingGame};
+    use super::{OngoingTrick, PlayerId, TrickTakingGame, PLAYERS};
 
     /// Strategy to create a random `TressetteCard`.
     fn italian_card_strategy() -> impl Strategy<Value = ItalianCard> {
@@ -588,9 +588,9 @@ mod tests {
         const TRICKS: usize = 10;
 
         fn determine_taker(
-            _cards: &[Self::CardType; Self::PLAYERS],
-            _first_to_play: super::PlayerId<{ Self::PLAYERS }>,
-        ) -> super::PlayerId<{ Self::PLAYERS }> {
+            _cards: &[Self::CardType; PLAYERS],
+            _first_to_play: super::PlayerId<{ PLAYERS }>,
+        ) -> super::PlayerId<{ PLAYERS }> {
             PlayerId::new(0).unwrap()
         }
     }

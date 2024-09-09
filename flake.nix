@@ -22,7 +22,7 @@
             cargo-watch
             cargo-udeps
             rust-analyzer
-            rust-bin.nightly.latest.default
+            rust-bin.stable.latest.default
           ];
         };
       }

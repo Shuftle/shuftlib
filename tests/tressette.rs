@@ -1,4 +1,3 @@
-#![feature(generic_const_exprs)]
 use shuftlib::{
     common::{
         cards::Deck,
