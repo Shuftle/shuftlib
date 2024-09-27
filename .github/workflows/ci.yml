@@ -64,6 +64,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@nightly
-      - run cargo install cargo-udeps
+      - run: cargo install cargo-udeps
       - name: Check for unused dependencies
         run: cargo +nightly udeps
