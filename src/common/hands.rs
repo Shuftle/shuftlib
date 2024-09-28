@@ -422,7 +422,9 @@ where
 
 /// Various games are usually played multiple times, until one team reaches a
 /// certain score. These "multiple times" are called hands: "We played a game of
-/// tressette and our team won in just 2 hands!". This type is generic over the
+/// tressette and our team won in just 2 hands!".
+///
+/// This type is generic over the
 /// actual card type, the number of players allowed and the number of tricks it
 /// takes to finish the hand.
 #[derive(Debug, Clone, Copy)]
