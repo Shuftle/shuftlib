@@ -34,6 +34,7 @@ impl TrickTakingGame for TressetteRules {
     /// # Examples
     ///
     /// ```
+    /// #![feature(generic_const_exprs)]
     /// use shuftlib::common::{hands::{TrickTakingGame, PlayerId}, cards::{ItalianRank, Suit}};
     /// use shuftlib::tressette::{TressetteRules, TressetteCard};
     ///
@@ -56,8 +57,8 @@ impl TrickTakingGame for TressetteRules {
         let (taker, _) = cards
             .iter()
             .enumerate()
-            .filter(|(_, &c)| c.suit() == leading_suit)
-            .max_by_key(|(_, &c)| c)
+            .filter(|&(_, &c)| c.suit() == leading_suit)
+            .max_by_key(|&(_, &c)| c)
             .expect("Max by key returned None. This shouldn't have happened, since it's being called on a non empty slice.");
 
         PlayerId::new(taker).expect("Initialization of a new PlayerId failed. This shouldn't have happened, since the input usize was computed starting from a fixed length slice.")
@@ -82,6 +83,7 @@ impl TressetteRules {
     /// # Examples
     ///
     /// ```
+    /// #![feature(generic_const_exprs)]
     /// use shuftlib::tressette::{TressetteRules, TressetteCard};
     /// use shuftlib::common::hands::Player;
     /// use shuftlib::common::cards::{Suit, ItalianRank};
@@ -215,6 +217,7 @@ impl TressetteCard {
     ///
     /// # Examples
     /// ```
+    /// #![feature(generic_const_exprs)]
     /// use shuftlib::{tressette::TressetteCard, common::cards::{Suit, ItalianRank}};
     /// use num_rational::Rational32;
     ///
@@ -244,6 +247,7 @@ impl TressetteCard {
     ///
     /// # Examples.
     /// ```
+    /// #![feature(generic_const_exprs)]
     /// use shuftlib::common::cards::{ItalianCard, ItalianRank, Suit};
     /// use shuftlib::tressette::TressetteCard;
     ///

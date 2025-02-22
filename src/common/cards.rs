@@ -365,7 +365,7 @@ mod tests {
 
         let decks = sorted_deck.cards.iter().zip(shuffled_deck.cards.iter());
 
-        let count_of_different_cards = decks.filter(|(&card1, &card2)| card1 != card2).count();
+        let count_of_different_cards = decks.filter(|&(&card1, &card2)| card1 != card2).count();
 
         assert_ne!(count_of_different_cards, 0);
     }
