@@ -50,6 +50,7 @@ where
     ///
     /// # Examples
     /// ```
+    /// #![feature(generic_const_exprs)]
     /// use shuftlib::common::hands::{Player, TrickTakingGame, PlayerId};
     /// use shuftlib::common::cards::{ItalianRank, Suit};
     /// use shuftlib::tressette::{TressetteRules, TressetteCard};
@@ -71,6 +72,7 @@ where
     ///
     /// # Examples
     /// ```
+    /// #![feature(generic_const_exprs)]
     /// use shuftlib::common::hands::{Player, TrickTakingGame, PlayerId};
     /// use shuftlib::common::cards::{ItalianRank, Suit};
     /// use shuftlib::tressette::{TressetteRules, TressetteCard};
@@ -107,6 +109,7 @@ where
     /// # Examples.
     ///
     /// ```
+    /// #![feature(generic_const_exprs)]
     /// use shuftlib::{common::hands::{Player, PlayerId, TrickTakingGame}, tressette::TressetteRules};
     ///
     /// let id = PlayerId::<{TressetteRules::PLAYERS}>::new(0).unwrap();
@@ -162,6 +165,7 @@ impl<const PLAYERS: usize> PlayerId<PLAYERS> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(generic_const_exprs)]
     /// use shuftlib::common::hands::PlayerId;
     ///
     /// let id = PlayerId::<4>::new(0);
@@ -399,6 +403,7 @@ where
     /// # Examples.
     ///
     /// ```
+    /// #![feature(generic_const_exprs)]
     /// use shuftlib::common::hands::{OngoingTrick, PlayerId, TrickTakingGame};
     /// use shuftlib::tressette::TressetteRules;
     ///
@@ -507,6 +512,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// #![feature(generic_const_exprs)]
     /// use shuftlib::{common::{hands::OngoingHand}, tressette::TressetteRules};
     ///
     /// let ongoing_hand = OngoingHand::<TressetteRules>::new();
