@@ -253,7 +253,7 @@ impl TressetteCard {
     ///
     /// let suit = Suit::Spades;
     /// let rank = ItalianRank::Ace;
-    /// assert_eq!(*TressetteCard::new(rank, suit), ItalianCard::new(rank,suit));
+    /// assert_eq!(*TressetteCard::new(rank, suit), ItalianCard::new(rank, suit));
     /// ```
     pub fn new(rank: ItalianRank, suit: Suit) -> Self {
         let card = ItalianCard::new(rank, suit);
