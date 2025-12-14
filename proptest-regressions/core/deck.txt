@@ -1,0 +1,12 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 504d5514fdaf5842380fd98544b9e79acb7ba0dbb34837faa7a5d2c54a0f1e1f # shrinks to card = (Ace, Hearts), mut deck = Deck { cards: [] }
+cc ed53cdee34dc5ffaaa5301eb8df346430662b237c8102337c0b3ac2958301e76 # shrinks to mut deck = Deck { cards: [ItalianCard { rank: Ace, suit: Hearts }, ItalianCard { rank: Ace, suit: Hearts }] }
+cc a0bea90e964a3f59c109c2b0f3812f3cf577b1d3bedf918af96466d63ad6c4c8 # shrinks to card = (Seven, Hearts), mut deck = Deck { cards: [ItalianCard { rank: King, suit: Diamonds }, ItalianCard { rank: Two, suit: Clubs }, ItalianCard { rank: Three, suit: Diamonds }, ItalianCard { rank: Ace, suit: Clubs }, ItalianCard { rank: Seven, suit: Diamonds }] }
+cc 40fd6a3829946fd2211407dbd5a44ad7c3ca7e4471dbcae106a4990fed46ab1f # shrinks to card = (Ace, Hearts)
+cc 7f14002fa9acd7850104a1552f96c9205f6a351be7ceca964577ecb2210da768 # shrinks to card = (Three, Clubs), mut deck = Deck { cards: [ItalianCard { rank: Two, suit: Clubs }, ItalianCard { rank: Three, suit: Diamonds }, ItalianCard { rank: Five, suit: Spades }, ItalianCard { rank: Six, suit: Clubs }, ItalianCard { rank: Three, suit: Clubs }] }
+cc be4cff658b83cbaacfba7c0505c9644c0dcf57e023db627ff060b5958a2b13ea # shrinks to card = (Ace, Hearts), mut deck = Deck { cards: [ItalianCard { rank: Ace, suit: Hearts }, ItalianCard { rank: King, suit: Diamonds }] }
