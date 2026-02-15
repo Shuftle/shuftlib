@@ -1,58 +1,60 @@
-#![feature(generic_const_exprs)]
-use shuftlib::{
-    common::{
-        cards::Deck,
-        hands::{OngoingHand, OngoingTrick, Player, PlayerId, TrickTakingGame},
-    },
-    tressette::{self, TressetteCard, TressetteRules},
-};
+#![allow(missing_docs)]
+#![allow(clippy::expect_used)]
+
+use shuftlib::tressette::{Game, MoveEffect, Status};
 
 #[test]
-#[allow(clippy::unwrap_used)]
 fn tressette_works() {
-    let mut first = true;
-    let mut leading_suit = None;
-    let first_to_play = PlayerId::new(0).unwrap();
-    let mut score = (0, 0);
-    let mut players = [
-        Player::new(PlayerId::new(0).unwrap()),
-        Player::new(PlayerId::new(1).unwrap()),
-        Player::new(PlayerId::new(2).unwrap()),
-        Player::new(PlayerId::new(3).unwrap()),
-    ];
-    let mut hands = Vec::new();
+    let mut game = Game::new();
 
-    while !TressetteRules::is_completed(score) {
-        let mut ongoing_hand = OngoingHand::<TressetteRules>::new();
-        let mut deck = Deck::italian();
-        deck.shuffle();
+    while !matches!(game.status(), Status::Finished { .. }) {
+        let legal_cards = game.legal_cards();
+        assert!(
+            !legal_cards.is_empty(),
+            "Should always have legal cards when game is ongoing"
+        );
 
-        for (i, &card) in deck.iter().enumerate() {
-            let player_index = (i / 5) % TressetteRules::PLAYERS;
-            players[player_index].give(TressetteCard::from(card));
-        }
+        // Always pick the first legal card (simple strategy for testing)
+        let chosen_card = legal_cards[0];
+        let effect = game
+            .play_card(chosen_card)
+            .expect("Legal card should succeed");
 
-        for trick_id in 0..TressetteRules::TRICKS {
-            let mut ongoing_trick = OngoingTrick::<TressetteRules>::new(first_to_play);
-            for _ in 0..TressetteRules::PLAYERS {
-                let next_to_play = ongoing_trick.next_to_play();
-                let playable = TressetteRules::playable(&players[*next_to_play], leading_suit);
-                TressetteRules::play(&mut players[*next_to_play], playable[0], &mut ongoing_trick);
-
-                if first {
-                    leading_suit = Some(playable[0].suit());
-                    first = !first;
-                }
+        match effect {
+            MoveEffect::CardPlayed => {
+                // Continue playing
             }
-            first = !first;
-            ongoing_hand.add(ongoing_trick.finish().unwrap(), trick_id);
+            MoveEffect::TrickCompleted { winner: _ } => {
+                // Trick completed, continue to next trick
+            }
+            MoveEffect::HandComplete {
+                trick_winner: _,
+                score,
+            } => {
+                // Hand completed, scores updated, new hand auto-dealt
+                assert_eq!(
+                    (score.0 + score.1) % 11,
+                    0,
+                    "Scores should always sum to multiple of 11"
+                );
+            }
+            MoveEffect::GameOver {
+                trick_winner: _,
+                final_score,
+            } => {
+                // Game is over
+                assert_eq!((final_score.0 + final_score.1) % 11, 0);
+                assert_ne!(final_score.0, final_score.1);
+                assert!(
+                    final_score.0 >= shuftlib::tressette::SCORE_TO_WIN
+                        || final_score.1 >= shuftlib::tressette::SCORE_TO_WIN
+                );
+            }
         }
-        let hand = ongoing_hand.finish().unwrap();
-        TressetteRules::compute_score(&hand, &mut score);
-        hands.push(hand);
     }
 
-    assert_eq!((score.0 + score.1) % 11, 0);
-    assert_ne!(score.0, score.1);
-    assert!(score.0 >= tressette::SCORE_TO_WIN || score.1 >= tressette::SCORE_TO_WIN);
+    // Verify final state
+    if let Status::Finished { winner } = game.status() {
+        assert!(winner.is_some(), "Tressette should never end in a draw");
+    }
 }
