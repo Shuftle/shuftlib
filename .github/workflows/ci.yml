@@ -1,25 +1,37 @@
-name: Rust
+name: Rust CI
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
-    types: [ opened, synchronize, reopened ]
+    types:
+      - opened
+      - synchronize
+      - reopened
     branches:
       - main
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: Test
+  nightly-test:
+    name: Test with nightly
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly
+      - name: Run tests
+        run: cargo test
+
+  test:
+    name: Test with stable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
       - name: Run tests
         run: cargo test
 
@@ -27,43 +39,29 @@ jobs:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
       - name: Enforce formatting
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - name: Linting
         run: cargo clippy -- -D warnings
-
-  coverage:
-    name: Code coverage
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - name: Install tarpaulin
-        run: cargo install cargo-tarpaulin
-      - name: Generate code coverage
-        run: cargo tarpaulin --verbose --workspace
 
   dependencies:
     name: Unused dependencies
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - run: cargo install cargo-udeps
-      - name: Check for unused dependencies
-        run: cargo +nightly udeps
+        uses: actions/checkout@v5
+      - name: Machete
+        uses: bnjbvr/cargo-machete@main
