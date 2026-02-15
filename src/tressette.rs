@@ -15,5 +15,5 @@ pub mod game;
 
 // Re-export main types for convenience
 pub use card::TressetteCard;
-pub use rules::{TressetteRules, SCORE_TO_WIN};
-pub use game::{Game, MoveEffect, Status, Error};
+pub use game::{Error, Game, MoveEffect, Status};
+pub use rules::{SCORE_TO_WIN, TressetteRules};
