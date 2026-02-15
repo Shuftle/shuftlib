@@ -1,4 +1,4 @@
-use rand::{Rng, seq::SliceRandom};
+use rand::{RngExt, seq::SliceRandom};
 use strum::IntoEnumIterator;
 
 use crate::core::{
@@ -223,7 +223,7 @@ impl<T: Card> Deck<T> {
         } else {
             let mut drawn = Vec::with_capacity(n);
             for _ in 0..n {
-                drawn.push(self.cards.pop().unwrap());
+                drawn.push(self.cards.pop()?);
             }
             Some(drawn.into_iter())
         }
