@@ -6,6 +6,7 @@
 
 use std::fmt::{Debug, Display};
 use strum::EnumIter;
+pub use strum::IntoEnumIterator;
 
 /// Italian card deck types and ranks.
 pub mod italian;

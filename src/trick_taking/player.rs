@@ -137,7 +137,7 @@ where
 }
 
 /// A player id can only be in the range 0..4.
-#[derive(Default, Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Default, Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub struct PlayerId(usize);
 
 impl PlayerId {

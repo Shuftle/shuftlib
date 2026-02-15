@@ -202,6 +202,33 @@ impl<T: Card> Deck<T> {
         self.cards.pop()
     }
 
+    /// Draws `n` cards from the top of the deck, if enough cards remain.
+    ///
+    /// Returns `Some` iterator over the drawn cards if the deck contains at least `n` cards,
+    /// or `None` if there are not enough cards left (the deck is unchanged in that case).
+    ///
+    /// # Examples
+    /// ```
+    /// use shuftlib::core::deck::Deck;
+    /// use shuftlib::core::italian::ItalianCard;
+    ///
+    /// let mut deck = Deck::italian();
+    /// let drawn = deck.draw_n(3).unwrap().collect::<Vec<_>>();
+    /// assert_eq!(drawn.len(), 3);
+    /// assert_eq!(deck.len(), 37);
+    /// ```
+    pub fn draw_n(&mut self, n: usize) -> Option<impl Iterator<Item = T>> {
+        if self.cards.len() < n {
+            None
+        } else {
+            let mut drawn = Vec::with_capacity(n);
+            for _ in 0..n {
+                drawn.push(self.cards.pop().unwrap());
+            }
+            Some(drawn.into_iter())
+        }
+    }
+
     /// Creates a new empty deck.
     ///
     /// # Examples
@@ -411,6 +438,19 @@ mod tests {
         let mut deck: Deck<ItalianCard> = Deck::new();
         deck.shuffle();
         assert!(deck.is_empty());
+    }
+
+    #[test]
+    fn draw_n_basic() {
+        let mut deck = Deck::italian();
+        let drawn: Vec<_> = deck.draw_n(5).unwrap().collect();
+        assert_eq!(drawn.len(), 5);
+        assert_eq!(deck.len(), 35);
+
+        // Drawing more than available returns None and does not change the deck
+        let mut deck = Deck::italian();
+        assert!(deck.draw_n(41).is_none());
+        assert_eq!(deck.len(), 40);
     }
 
     proptest! {
