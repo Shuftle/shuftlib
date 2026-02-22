@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/Shuftle/shuftlib/compare/v0.2.0...v0.3.0) - 2026-02-22
+
+### Other
+
+- [**breaking**] code cleanup and api refactoring, license ([#12](https://github.com/Shuftle/shuftlib/pull/12))
+
 ## [0.2.0](https://github.com/Shuftle/shuftlib/compare/v0.1.2...v0.2.0) - 2026-02-15
 
 ### Other
