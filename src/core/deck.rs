@@ -456,7 +456,7 @@ mod tests {
     proptest! {
         #[test]
         fn shuffle_preserves_cards(
-            mut deck in deck_strategy(0..=39)
+            mut deck in deck_strategy(0..40)
         ) {
             let original: Vec<ItalianCard> = deck.as_slice().to_vec();
             deck.shuffle();
@@ -473,7 +473,7 @@ mod tests {
 
         #[test]
         fn draw_all_cards_yields_unique(
-            mut deck in deck_strategy(0..=39)
+            mut deck in deck_strategy(0..40)
         ) {
             let mut seen = std::collections::HashSet::new();
             while let Some(card) = deck.draw() {
@@ -494,7 +494,7 @@ mod tests {
         #[test]
         fn shuffle_card_inserts_card(
             card in (italian_rank_strategy(), suit_strategy()),
-            mut deck in deck_strategy(0..=39)
+            mut deck in deck_strategy(0..40)
         ) {
             let card = ItalianCard::new(card.0, card.1);
             let old_len: usize = deck.len();
@@ -505,7 +505,7 @@ mod tests {
 
         #[test]
         fn shuffle_card_never_inserts_at_top_or_bottom_for_large_deck(
-            mut deck in deck_strategy(2..=40),
+            mut deck in deck_strategy(2..40),
             card in (italian_rank_strategy(), suit_strategy())
         ) {
             let card = ItalianCard::new(card.0, card.1);
@@ -521,15 +521,15 @@ mod tests {
 /// Test utilities for the deck module.
 #[cfg(test)]
 pub mod test_utils {
+    use std::ops::Range;
+
     use super::*;
     use crate::core::Suit;
     use crate::core::italian::{ItalianCard, ItalianRank};
     use proptest::prelude::*;
 
     /// Generates a Deck<ItalianCard> with unique cards, of size in the given range.
-    pub fn deck_strategy(
-        size: std::ops::RangeInclusive<usize>,
-    ) -> impl Strategy<Value = Deck<ItalianCard>> {
+    pub fn deck_strategy(size: Range<usize>) -> impl Strategy<Value = Deck<ItalianCard>> {
         // All possible unique cards
         let all_cards: Vec<ItalianCard> = [
             ItalianRank::Ace,

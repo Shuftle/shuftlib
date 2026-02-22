@@ -103,4 +103,18 @@ pub mod test_utils {
             Just(ItalianRank::King),
         ]
     }
+
+    /// Generates a random Italian card strategy for property testing.
+    pub fn italian_card_strategy() -> impl Strategy<Value = super::ItalianCard> {
+        (
+            italian_rank_strategy(),
+            prop_oneof![
+                Just(super::super::Suit::Hearts),
+                Just(super::super::Suit::Clubs),
+                Just(super::super::Suit::Spades),
+                Just(super::super::Suit::Diamonds),
+            ],
+        )
+            .prop_map(|(rank, suit)| super::ItalianCard::new(rank, suit))
+    }
 }

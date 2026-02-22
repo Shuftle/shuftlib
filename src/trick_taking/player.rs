@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, ops::Add};
 
 use anyhow::bail;
 
@@ -208,6 +208,15 @@ impl PlayerId {
     }
 }
 
+impl Add<usize> for PlayerId {
+    type Output = Self;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        let sum = self.0 + rhs;
+        PlayerId(sum % PLAYERS)
+    }
+}
+
 impl TryFrom<usize> for PlayerId {
     type Error = anyhow::Error;
 
@@ -216,7 +225,7 @@ impl TryFrom<usize> for PlayerId {
             Ok(PlayerId(value))
         } else {
             bail!(
-                "Tried to convert {} into a PlayerId, but acceptable values are in range 0..PLAYERS",
+                "Tried to convert {} into a PlayerId, but acceptable values are in range 0..{PLAYERS}",
                 value
             )
         }
@@ -226,5 +235,31 @@ impl TryFrom<usize> for PlayerId {
 impl Display for PlayerId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+#[cfg(test)]
+mod test_utils {
+    use proptest::prelude::Strategy;
+
+    use crate::trick_taking::{PLAYERS, PlayerId};
+
+    pub(crate) fn player_id_strategy() -> impl Strategy<Value = PlayerId> {
+        (0..PLAYERS).prop_map(|id| PlayerId::try_from(id).unwrap())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use crate::trick_taking::{PLAYERS, player::test_utils::player_id_strategy};
+    proptest! {
+        #[test]
+        fn sum_always_gives_valid_playerid(p_id in player_id_strategy(), rhs: usize) {
+            let sum = p_id + rhs;
+
+            assert!(sum.0<PLAYERS);
+        }
     }
 }

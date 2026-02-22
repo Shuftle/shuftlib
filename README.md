@@ -26,4 +26,6 @@ Documentation is at [docs.rs/shuftlib](https://docs.rs/shuftlib).
 
 ## License
 
-Licensed under either the MIT License or the Apache License 2.0.
+Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0-only).
+
+See the [LICENSE](LICENSE) file for details.

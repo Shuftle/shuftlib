@@ -160,14 +160,6 @@ where
         self.play_count += 1;
     }
 
-    /// Sets a card for a specific player in the trick.
-    /// This is primarily for testing or setup purposes.
-    pub fn set_card(&mut self, player: PlayerId, card: G::CardType) {
-        self.cards[player.as_usize()] = Some(card);
-        self.play_count += 1;
-        self.next_to_play = player.next();
-    }
-
     /// Tries to transform the current `OngoingTrick` into a `Trick` by
     /// determining the taker of the trick. It doesn't make any assumption on
     /// previously played cards during the current `OngoingHand`. It also does
@@ -305,41 +297,20 @@ where
     }
 }
 
+/// Testing utilities for trick-taking game components.
 #[cfg(test)]
-mod test_utils {
+pub mod test_utils {
     use proptest::collection::hash_set;
     use proptest::prelude::*;
 
-    use crate::core::Suit;
-    use crate::core::italian::{ItalianCard, ItalianRank};
+    use crate::core::deck::Deck;
+    pub use crate::core::italian::test_utils::italian_card_strategy;
+    use crate::trick_taking::{Hand, OngoingTrick, PlayerId, TrickTakingGame};
+    use crate::{core::italian::ItalianCard, trick_taking::PLAYERS};
 
-    use crate::trick_taking::{OngoingTrick, PlayerId, TrickTakingGame};
-
-    /// Strategy to create a random `ItalianCard`.
-    pub fn italian_card_strategy() -> impl Strategy<Value = ItalianCard> {
-        (
-            prop_oneof![
-                Just(ItalianRank::Ace),
-                Just(ItalianRank::Two),
-                Just(ItalianRank::Three),
-                Just(ItalianRank::Four),
-                Just(ItalianRank::Five),
-                Just(ItalianRank::Six),
-                Just(ItalianRank::Seven),
-                Just(ItalianRank::Jack),
-                Just(ItalianRank::Knight),
-                Just(ItalianRank::King),
-            ],
-            prop_oneof![
-                Just(Suit::Hearts),
-                Just(Suit::Clubs),
-                Just(Suit::Spades),
-                Just(Suit::Diamonds),
-            ],
-        )
-            .prop_map(|(rank, suit)| ItalianCard::new(rank, suit))
-    }
-
+    /// A minimal test implementation of TrickTakingGame for testing purposes.
+    ///
+    /// This implementation always determines PLAYER_0 as the trick taker.
     #[derive(Clone, Copy, Debug)]
     pub struct TestGame {}
 
@@ -347,17 +318,32 @@ mod test_utils {
         type CardType = ItalianCard;
 
         fn determine_taker(
-            _cards: &[Self::CardType; super::super::PLAYERS],
-            _first_to_play: super::super::PlayerId,
+            _cards: &[Self::CardType; PLAYERS],
+            _first_to_play: PlayerId,
         ) -> super::super::PlayerId {
             PlayerId::PLAYER_0
+        }
+
+        fn deck() -> Deck<Self::CardType> {
+            Deck::italian()
+        }
+
+        fn score_hand(_hand: &Hand<Self>) -> (u8, u8)
+        where
+            Self: Sized,
+        {
+            (0, 0)
+        }
+
+        fn is_game_over(_scores: (u8, u8)) -> bool {
+            true
         }
     }
 
     /// Strategy to create an `OngoingTrick` filled with random cards.
     pub fn ongoing_trick_strategy() -> impl Strategy<Value = OngoingTrick<TestGame>> {
-        hash_set(italian_card_strategy(), super::super::PLAYERS).prop_map(|hash_set| {
-            let mut cards = [None; super::super::PLAYERS];
+        hash_set(italian_card_strategy(), PLAYERS).prop_map(|hash_set| {
+            let mut cards = [None; PLAYERS];
             hash_set
                 .iter()
                 .enumerate()

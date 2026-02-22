@@ -77,7 +77,6 @@ where
     G: TrickTakingGame,
 {
     current_trick: Option<OngoingTrick<G>>,
-    index: usize,
     tricks: [Option<Trick<G>>; TRICKS],
 }
 
@@ -115,21 +114,6 @@ where
         &self.tricks
     }
 
-    /// Returns the index of this [`OngoingHand<G>`].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use shuftlib::trick_taking::OngoingHand;
-    /// use shuftlib::tressette::TressetteRules;
-    ///
-    /// let hand = OngoingHand::<TressetteRules>::new();
-    /// assert_eq!(hand.index(), 0);
-    /// ```
-    pub fn index(&self) -> usize {
-        self.index
-    }
-
     /// Transforms an `OngoingHand` into a `Hand`, a read-only data structure
     /// used to just store the information related to a hand that has been played.
     ///
@@ -144,14 +128,9 @@ where
     /// use shuftlib::tressette::{TressetteRules, TressetteCard};
     ///
     /// let mut ongoing_hand = OngoingHand::<TressetteRules>::new();
-    /// // Add tricks...
-    /// // let finished = ongoing_hand.finish(); // Would be None if incomplete
+    /// assert!(ongoing_hand.finish().is_none());
     /// ```
     pub fn finish(self) -> Option<Hand<G>> {
-        if self.tricks.iter().any(|t| t.is_none()) {
-            return None;
-        }
-
         let tricks: [Trick<G>; TRICKS] = self
             .tricks
             .into_iter()
@@ -173,7 +152,6 @@ where
     ///
     /// let ongoing_hand = OngoingHand::<TressetteRules>::new();
     ///
-    /// assert_eq!(ongoing_hand.index(), 0);
     /// assert!(ongoing_hand.current_trick().is_none());
     /// ongoing_hand.tricks().iter().for_each(|t| assert!(t.is_none()));
     /// ```
@@ -181,7 +159,6 @@ where
         Self {
             tricks: [const { None }; TRICKS],
             current_trick: None,
-            index: 0,
         }
     }
 

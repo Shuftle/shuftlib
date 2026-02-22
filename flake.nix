@@ -30,6 +30,7 @@
             cargo-machete
             cargo-deny
             cargo-edit
+            cargo-semver-checks
             rust-analyzer
             rust-bin.stable.latest.default
           ];
