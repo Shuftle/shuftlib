@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 #![allow(clippy::expect_used)]
 
-use shuftlib::tressette::{Game, MoveEffect, Status};
+use shuftlib::tressette::{Game, MoveEffect, SCORE_TO_WIN, Status};
 
 #[test]
 fn tressette_works() {
@@ -14,7 +14,6 @@ fn tressette_works() {
             "Should always have legal cards when game is ongoing"
         );
 
-        // Always pick the first legal card (simple strategy for testing)
         let chosen_card = legal_cards[0];
         let effect = game
             .play_card(chosen_card)
@@ -45,16 +44,8 @@ fn tressette_works() {
                 // Game is over
                 assert_eq!((final_score.0 + final_score.1) % 11, 0);
                 assert_ne!(final_score.0, final_score.1);
-                assert!(
-                    final_score.0 >= shuftlib::tressette::SCORE_TO_WIN
-                        || final_score.1 >= shuftlib::tressette::SCORE_TO_WIN
-                );
+                assert!(final_score.0 >= SCORE_TO_WIN || final_score.1 >= SCORE_TO_WIN);
             }
         }
-    }
-
-    // Verify final state
-    if let Status::Finished { winner } = game.status() {
-        assert!(winner.is_some(), "Tressette should never end in a draw");
     }
 }

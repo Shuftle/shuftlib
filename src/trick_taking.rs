@@ -6,7 +6,7 @@
 //! - Hand completion and scoring mechanics
 //! - Core trait for implementing different trick-taking games
 
-use crate::core::Card;
+use crate::core::{Card, deck::Deck};
 
 /// Number of tricks in all games.
 pub const TRICKS: usize = 10;
@@ -28,27 +28,24 @@ pub trait TrickTakingGame {
     ///
     /// Returns the updated scores for both teams: (team_0_2_score, team_1_3_score).
     /// Default implementation returns unchanged scores.
-    fn score_hand(&self, _hand: &Hand<Self>) -> (u8, u8)
+    fn score_hand(hand: &Hand<Self>) -> (u8, u8)
     where
-        Self: Sized,
-    {
-        (0, 0)
-    }
+        Self: Sized;
 
     /// Check if the game is over based on current scores.
     ///
     /// Returns true if the game should end with the given scores.
     /// Default implementation never ends the game.
-    fn is_game_over(&self, _scores: (u8, u8)) -> bool {
-        false
-    }
-
+    fn is_game_over(scores: (u8, u8)) -> bool;
     /// Get the number of cards dealt to each player at the start of a hand.
     ///
     /// Default is 10 cards (standard for Tressette).
     fn hand_size(&self) -> usize {
         10
     }
+
+    /// Get a deck as per the rules of the game.
+    fn deck() -> Deck<Self::CardType>;
 }
 
 /// Generic player management and identification.

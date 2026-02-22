@@ -15,11 +15,11 @@ repository = "https://github.com/shuftle/shuftlib"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0.101"
+anyhow = "1.0.102"
 bon = "3.9.0"
 num-rational = "0.4.2"
 rand="0.10"
-strum = {version="0.27", default-features=false, features=["derive"]}
+strum = {version="0.28", default-features=false, features=["derive"]}
 thiserror = "2.0"
 
 [features]

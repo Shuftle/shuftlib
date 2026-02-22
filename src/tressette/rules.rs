@@ -1,5 +1,6 @@
 use crate::core::{
     Suit,
+    deck::Deck,
     trick_taking::{Hand, OngoingTrick, PLAYERS, Player, PlayerId, TrickTakingGame},
 };
 use num_rational::Rational32;
@@ -67,8 +68,8 @@ impl TrickTakingGame for TressetteRules {
     ///   TressetteCard::new(ItalianRank::Four, Suit::Hearts),
     /// ];
     ///
-    /// let taker = TressetteRules::determine_taker(&cards, PlayerId::try_from(2).unwrap());
-    /// assert_eq!(taker, PlayerId::try_from(2).unwrap());
+    /// let taker = TressetteRules::determine_taker(&cards, PlayerId::PLAYER_2);
+    /// assert_eq!(taker, PlayerId::PLAYER_2);
     /// ```
     #[allow(clippy::expect_used)]
     fn determine_taker(cards: &[TressetteCard; PLAYERS], first_to_play: PlayerId) -> PlayerId {
@@ -83,14 +84,44 @@ impl TrickTakingGame for TressetteRules {
         PlayerId::try_from(taker).expect("Initialization of a new PlayerId failed. This shouldn't have happened, since the input usize was computed starting from a fixed length slice.")
     }
 
-    fn score_hand(&self, hand: &Hand<Self>) -> (u8, u8) {
-        let mut score = (0, 0);
-        Self::compute_score(hand, &mut score);
+    fn is_game_over(scores: (u8, u8)) -> bool {
+        (scores.0 >= SCORE_TO_WIN && scores.0 > scores.1)
+            || (scores.1 >= SCORE_TO_WIN && scores.1 > scores.0)
+    }
+
+    fn score_hand(hand: &Hand<Self>) -> (u8, u8) {
+        let mut tmp_score = (Rational32::new(0, 3), Rational32::new(0, 3));
+
+        let mut taker = 0;
+        for trick in hand.tricks() {
+            taker = trick.taker().as_usize();
+            if taker == 0 || taker == 2 {
+                tmp_score.0 += trick.cards().iter().map(|c| c.value()).sum::<Rational32>();
+            } else {
+                tmp_score.1 += trick.cards().iter().map(|c| c.value()).sum::<Rational32>();
+            }
+        }
+
+        let mut score = (
+            tmp_score.0.to_integer() as u8,
+            tmp_score.1.to_integer() as u8,
+        );
+
+        // The game awards 1 extra point to the taker of the last trick.
+        if taker == 0 || taker == 2 {
+            score.0 += 1;
+        } else {
+            score.1 += 1;
+        }
+
         score
     }
 
-    fn is_game_over(&self, scores: (u8, u8)) -> bool {
-        Self::is_completed(scores)
+    fn deck() -> Deck<Self::CardType> {
+        Deck::italian()
+            .into_iter()
+            .map(TressetteCard::from)
+            .collect()
     }
 }
 
@@ -100,12 +131,6 @@ pub const SCORE_TO_WIN: u8 = 31;
 impl TressetteRules {
     /// Number of cards dealt to each player at the start of a Tressette hand.
     pub const HAND_SIZE: usize = 10;
-    /// Determines if a team won the game. A team wins the game when its score is
-    /// greater than 31 and has a higher score than the other team.
-    pub fn is_completed(score: (u8, u8)) -> bool {
-        (score.0 >= SCORE_TO_WIN && score.0 > score.1)
-            || (score.1 >= SCORE_TO_WIN && score.1 > score.0)
-    }
 
     /// Returns playable cards along with their indices in the player's hand.
     ///
@@ -229,31 +254,6 @@ impl TressetteRules {
         ongoing_trick.play(card);
         Ok(card)
     }
-
-    /// Computes the score for a hand of the tressette game.
-    /// Score is always a maximum of 11 points.
-    pub fn compute_score(hand: &Hand<Self>, score: &mut (u8, u8)) {
-        let mut tmp_score = (Rational32::new(0, 3), Rational32::new(0, 3));
-
-        let mut taker = 0;
-        for trick in hand.tricks() {
-            taker = trick.taker().as_usize();
-            if taker == 0 || taker == 2 {
-                tmp_score.0 += trick.cards().iter().map(|c| c.value()).sum::<Rational32>();
-            } else {
-                tmp_score.1 += trick.cards().iter().map(|c| c.value()).sum::<Rational32>();
-            }
-        }
-
-        score.0 += tmp_score.0.to_integer() as u8;
-        score.1 += tmp_score.1.to_integer() as u8;
-
-        if taker == 0 || taker == 2 {
-            score.0 += 1;
-        } else {
-            score.1 += 1;
-        }
-    }
 }
 
 #[cfg(test)]
@@ -316,39 +316,39 @@ mod test_utils {
 mod tests {
     use proptest::prelude::*;
 
-    use crate::core::Suit;
     use crate::trick_taking::PlayerId;
+    use crate::{core::Suit, trick_taking::TrickTakingGame};
 
     use super::{SCORE_TO_WIN, TressetteRules};
 
     proptest! {
         #[test]
         fn a_team_won_with_both_below(team1_score in 0u8..SCORE_TO_WIN, team2_score in 0u8..SCORE_TO_WIN) {
-            let result = TressetteRules::is_completed((team1_score, team2_score));
+            let result = TressetteRules::is_game_over((team1_score, team2_score));
             assert!(!result);
         }
 
         #[test]
         fn a_team_won_with_both_above_and_same(score in SCORE_TO_WIN..u8::MAX) {
-            let result = TressetteRules::is_completed((score, score));
+            let result = TressetteRules::is_game_over((score, score));
             assert!(!result);
         }
 
         #[test]
         fn a_team_won_with_both_above_and_different(score in SCORE_TO_WIN..u8::MAX) {
-            let result = TressetteRules::is_completed((score, score + 1));
+            let result = TressetteRules::is_game_over((score, score + 1));
             assert!(result);
         }
 
         #[test]
         fn a_team_won_with_team1_above(team1_score in 0u8..SCORE_TO_WIN, team2_score in SCORE_TO_WIN..u8::MAX) {
-            let result = TressetteRules::is_completed((team1_score, team2_score));
+            let result = TressetteRules::is_game_over((team1_score, team2_score));
             assert!(result);
         }
 
         #[test]
         fn a_team_won_with_team2_above(team1_score in SCORE_TO_WIN..u8::MAX, team2_score in 0u8..SCORE_TO_WIN ) {
-            let result = TressetteRules::is_completed((team1_score, team2_score));
+            let result = TressetteRules::is_game_over((team1_score, team2_score));
             assert!(result);
         }
 
