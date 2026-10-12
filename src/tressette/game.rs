@@ -1,5 +1,7 @@
 //! High-level game state management for Tressette.
 
+use rand::rngs::StdRng;
+
 use crate::{
     core::{Suit, deck::Deck},
     trick_taking::{Hand, OngoingHand, OngoingTrick, PLAYERS, Player, PlayerId, TrickTakingGame},
@@ -77,7 +79,7 @@ pub enum Error {
 /// The state of a Tressette game at a given point.
 ///
 /// This includes the players' hands, the current trick, scores, history, and other game state.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Game {
     deck: Deck<TressetteCard>,
     players: [Player<TressetteRules>; PLAYERS],
@@ -89,6 +91,9 @@ pub struct Game {
     history: Vec<(TressetteCard, MoveEffect)>,
     /// Seed used for all randomness at construction, enabling deterministic replay.
     seed: u64,
+    /// RNG seeded from `seed`, persisted and reused for every reshuffle across
+    /// the game's lifetime so replaying from `seed` reproduces it exactly.
+    rng: StdRng,
 }
 
 impl Game {
@@ -110,14 +115,11 @@ impl Game {
     fn from_seed(seed: u64) -> Self {
         use rand::RngExt;
         use rand::SeedableRng;
-        use rand::rngs::StdRng;
-        use rand::seq::SliceRandom;
 
         let mut rng = StdRng::seed_from_u64(seed);
         let dealing_player = PlayerId::ALL[rng.random_range(0..PLAYERS)];
-        let mut cards: Vec<_> = TressetteRules::deck().into_iter().collect();
-        cards.shuffle(&mut rng);
-        let deck = Deck::from(cards);
+        let mut deck = TressetteRules::deck();
+        deck.shuffle(&mut rng);
         let mut game = Self {
             players: [
                 Player::new(PlayerId::PLAYER_0),
@@ -133,6 +135,7 @@ impl Game {
             dealing_player,
             deck,
             seed,
+            rng,
         };
         game.initialize_new_hand();
         game.deal();
@@ -524,6 +527,7 @@ impl Game {
                 final_score: self.score,
             })
         } else {
+            self.deck.shuffle(&mut self.rng);
             self.initialize_new_hand();
             self.deal();
             Ok(MoveEffect::HandComplete {
@@ -637,6 +641,45 @@ mod tests {
         game.play_card(legal2[0]).unwrap();
 
         assert_eq!(game.history().len(), 2);
+    }
+
+    #[test]
+    fn deck_is_reshuffled_between_hands() {
+        let mut game = Game::from_seed(42);
+
+        while game.hands_completed() == 0 {
+            let legal = game.legal_cards();
+            game.play_card(legal[0]).unwrap();
+        }
+
+        // Reconstruct exactly what `deal()` would have produced for hand 2
+        // if the deck had NOT been reshuffled: `collect_cards` always pushes
+        // the just-completed hand's cards back in a fixed (trick, player)
+        // order, and `deal()` draws 5 at a time by popping from the end.
+        let last_hand = game.completed_hands.last().unwrap();
+        let mut unshuffled: Vec<TressetteCard> = last_hand
+            .tricks()
+            .iter()
+            .flat_map(|t| t.cards().iter())
+            .copied()
+            .collect();
+
+        let mut predicted: [Vec<TressetteCard>; PLAYERS] =
+            [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        let mut to_deal_to = game.dealing_player + 1;
+        while !unshuffled.is_empty() {
+            for _ in 0..5 {
+                predicted[to_deal_to.as_usize()].push(unshuffled.pop().unwrap());
+            }
+            to_deal_to.inc();
+        }
+
+        // With a real shuffle, matching this zero-entropy prediction for even
+        // one player is astronomically unlikely, let alone all four.
+        for player in PlayerId::ALL {
+            let actual = game.hand(player).to_vec();
+            assert_ne!(actual, predicted[player.as_usize()], "player {player}");
+        }
     }
 
     proptest! {
