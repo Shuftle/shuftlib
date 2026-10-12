@@ -1,4 +1,10 @@
-use rand::{RngExt, seq::SliceRandom};
+//! A generic, stack-like collection of cards: `draw` and `push` act on the same end,
+//! plus shuffle and deal operations.
+//!
+//! [`Deck`](crate::core::deck::Deck) is generic over any [`Card`] implementation; this
+//! module also provides constructors for the standard Italian and French decks.
+
+use rand::{Rng, RngExt, seq::SliceRandom};
 use strum::IntoEnumIterator;
 
 use crate::core::{
@@ -14,30 +20,25 @@ use crate::core::{
 ///
 /// Creating an Italian deck:
 /// ```
-/// use shuftlib::core::deck::Deck;
-/// use shuftlib::core::italian::{ItalianCard, ItalianRank};
-/// use shuftlib::core::Suit;
+/// use shuftlib::core::{deck::Deck, italian::ItalianRank, Suit};
 ///
-/// let deck = Deck::<ItalianCard>::italian();
+/// let deck = Deck::italian();
 /// assert_eq!(deck.len(), 40);
 /// assert!(deck.iter().any(|card| card.rank() == ItalianRank::Ace && card.suit() == Suit::Hearts));
 /// ```
 ///
 /// Creating a French deck:
 /// ```
-/// use shuftlib::core::deck::Deck;
-/// use shuftlib::core::french::{FrenchCard, FrenchRank};
-/// use shuftlib::core::Suit;
+/// use shuftlib::core::{deck::Deck, french::FrenchRank, Suit};
 ///
-/// let deck = Deck::<FrenchCard>::french();
+/// let deck = Deck::french();
 /// assert_eq!(deck.len(), 52);
 /// assert!(deck.iter().any(|card| card.rank() == FrenchRank::Ace && card.suit() == Suit::Hearts));
 /// ```
 ///
 /// Creating a French deck with jokers:
 /// ```
-/// use shuftlib::core::deck::Deck;
-/// use shuftlib::core::french::{FrenchWithJoker, Joker};
+/// use shuftlib::core::{deck::Deck, french::FrenchWithJoker};
 ///
 /// let deck = Deck::french_with_jokers(2);
 /// assert_eq!(deck.len(), 54);
@@ -55,12 +56,10 @@ const ITALIAN_CARDS: usize = 40;
 
 impl Deck<ItalianCard> {
     /// Creates a new deck in the Italian format.
-    /// Creates a new deck in the Italian format.
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::italian::ItalianCard;
+    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
     ///
     /// let deck = Deck::italian();
     /// assert_eq!(deck.len(), 40);
@@ -78,13 +77,11 @@ impl Deck<ItalianCard> {
 }
 
 impl Deck<FrenchCard> {
-    /// Creates a new 52 cards French deck.
-    /// Creates a new 52 cards French deck.
+    /// Creates a new 52-card French deck.
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::french::FrenchCard;
+    /// use shuftlib::core::{deck::Deck, french::FrenchCard};
     ///
     /// let deck = Deck::french();
     /// assert_eq!(deck.len(), 52);
@@ -99,14 +96,14 @@ impl Deck<FrenchCard> {
 
         Deck { cards }
     }
+}
 
-    /// Creates a new 52 cards French deck, with the addition of the specified amount of jokers.
-    /// Creates a new 52 cards French deck, with the addition of the specified amount of jokers.
+impl Deck<FrenchWithJoker> {
+    /// Creates a new 52-card French deck, with the specified number of jokers added.
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::french::{FrenchWithJoker, Joker};
+    /// use shuftlib::core::{deck::Deck, french::{FrenchWithJoker, Joker}};
     ///
     /// let deck = Deck::french_with_jokers(2);
     /// assert_eq!(deck.len(), 54);
@@ -131,36 +128,37 @@ impl Deck<FrenchCard> {
 impl<T: Card> Deck<T> {
     /// Performs a random permutation on the deck using the Fisher-Yates shuffle algorithm.
     ///
+    /// Takes the random number generator to use, so callers that need reproducible
+    /// shuffles (e.g. for deterministic replay) can supply a seeded one.
+    ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::italian::ItalianCard;
+    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
     ///
     /// let mut deck = Deck::italian();
-    /// deck.shuffle();
+    /// deck.shuffle(&mut rand::rng());
     /// assert_eq!(deck.len(), 40);
     /// ```
-    pub fn shuffle(&mut self) {
-        let mut rng = rand::rng();
-        self.cards.shuffle(&mut rng);
+    pub fn shuffle(&mut self, rng: &mut impl Rng) {
+        self.cards.shuffle(rng);
     }
 
     /// Adds a card in a random position inside the deck.
     ///
+    /// Takes the random number generator to use, so callers that need reproducible
+    /// results (e.g. for deterministic replay) can supply a seeded one.
+    ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::italian::{ItalianCard, ItalianRank};
-    /// use shuftlib::core::Suit;
+    /// use shuftlib::core::{deck::Deck, italian::{ItalianCard, ItalianRank}, Suit};
     ///
     /// let mut deck = Deck::italian();
     /// let card = ItalianCard::new(ItalianRank::Ace, Suit::Hearts);
-    /// deck.shuffle_card(card);
-    /// assert!(deck.len() >= 41);
+    /// deck.shuffle_card(card, &mut rand::rng());
+    /// assert_eq!(deck.len(), 41);
     /// ```
-    pub fn shuffle_card(&mut self, card: T) {
+    pub fn shuffle_card(&mut self, card: T, rng: &mut impl Rng) {
         let len = self.cards.len();
-        let mut rng = rand::rng();
         let pos = match len {
             0 => 0,
             1 => 1,
@@ -174,9 +172,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::italian::{ItalianCard, ItalianRank};
-    /// use shuftlib::core::Suit;
+    /// use shuftlib::core::{deck::Deck, italian::{ItalianCard, ItalianRank}, Suit};
     ///
     /// let mut deck = Deck::new();
     /// let card = ItalianCard::new(ItalianRank::Ace, Suit::Hearts);
@@ -191,8 +187,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::italian::ItalianCard;
+    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
     ///
     /// let mut deck = Deck::italian();
     /// let card = deck.draw();
@@ -209,8 +204,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::italian::ItalianCard;
+    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
     ///
     /// let mut deck = Deck::italian();
     /// let drawn = deck.draw_n(3).unwrap().collect::<Vec<_>>();
@@ -233,8 +227,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::italian::ItalianCard;
+    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
     ///
     /// let deck: Deck<ItalianCard> = Deck::new();
     /// assert!(deck.is_empty());
@@ -247,8 +240,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::italian::ItalianCard;
+    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
     ///
     /// let deck: Deck<ItalianCard> = Deck::with_capacity(10);
     /// assert!(deck.is_empty());
@@ -263,9 +255,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::italian::{ItalianCard, ItalianRank};
-    /// use shuftlib::core::Suit;
+    /// use shuftlib::core::{deck::Deck, italian::{ItalianCard, ItalianRank}, Suit};
     ///
     /// let cards = vec![
     ///     ItalianCard::new(ItalianRank::Ace, Suit::Hearts),
@@ -284,9 +274,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::italian::{ItalianCard, ItalianRank};
-    /// use shuftlib::core::Suit;
+    /// use shuftlib::core::{deck::Deck, italian::{ItalianCard, ItalianRank}, Suit};
     ///
     /// let mut deck = Deck::from(vec![
     ///     ItalianCard::new(ItalianRank::Ace, Suit::Hearts),
@@ -305,8 +293,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::italian::ItalianCard;
+    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
     ///
     /// let deck = Deck::italian();
     /// let slice = deck.as_slice();
@@ -320,8 +307,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::italian::ItalianCard;
+    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
     ///
     /// let mut deck = Deck::italian();
     /// let slice = deck.as_mut_slice();
@@ -336,9 +322,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::italian::{ItalianCard, ItalianRank};
-    /// use shuftlib::core::Suit;
+    /// use shuftlib::core::{deck::Deck, italian::{ItalianCard, ItalianRank}, Suit};
     ///
     /// let cards = vec![
     ///     ItalianCard::new(ItalianRank::Ace, Suit::Hearts),
@@ -356,8 +340,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::deck::Deck;
-    /// use shuftlib::core::italian::ItalianCard;
+    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
     ///
     /// let deck: Deck<ItalianCard> = Deck::new();
     /// assert!(deck.is_empty());
@@ -428,7 +411,7 @@ mod tests {
         let sorted_deck = Deck::italian();
 
         let mut shuffled_deck = Deck::italian();
-        shuffled_deck.shuffle();
+        shuffled_deck.shuffle(&mut rand::rng());
 
         assert_ne!(sorted_deck.as_slice(), shuffled_deck.as_slice());
     }
@@ -436,7 +419,7 @@ mod tests {
     #[test]
     fn shuffle_empty_deck() {
         let mut deck: Deck<ItalianCard> = Deck::new();
-        deck.shuffle();
+        deck.shuffle(&mut rand::rng());
         assert!(deck.is_empty());
     }
 
@@ -459,7 +442,7 @@ mod tests {
             mut deck in deck_strategy(0..40)
         ) {
             let original: Vec<ItalianCard> = deck.as_slice().to_vec();
-            deck.shuffle();
+            deck.shuffle(&mut rand::rng());
             let shuffled: Vec<ItalianCard> = deck.as_slice().to_vec();
 
             // Same length and same set of cards (order may differ)
@@ -498,7 +481,7 @@ mod tests {
         ) {
             let card = ItalianCard::new(card.0, card.1);
             let old_len: usize = deck.len();
-            deck.shuffle_card(card);
+            deck.shuffle_card(card, &mut rand::rng());
             prop_assert!(deck.as_slice().contains(&card));
             prop_assert_eq!(deck.len(), old_len + 1);
         }
@@ -510,7 +493,7 @@ mod tests {
         ) {
             let card = ItalianCard::new(card.0, card.1);
             prop_assume!(!deck.as_slice().contains(&card));
-            deck.shuffle_card(card);
+            deck.shuffle_card(card, &mut rand::rng());
             let pos = deck.as_slice().iter().position(|c| *c == card).unwrap();
             let new_len = deck.len();
             prop_assert!(pos != 0 && pos != new_len - 1);

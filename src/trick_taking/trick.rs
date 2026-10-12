@@ -1,3 +1,8 @@
+//! A single trick: the cards played by each player in one round, and who won it.
+//!
+//! [`OngoingTrick`] accumulates plays until every player has moved, then
+//! [`OngoingTrick::finish`] determines the taker and produces an immutable [`Trick`].
+
 use std::{fmt::Display, ops::Deref};
 
 use super::{PLAYERS, PlayerId, TrickTakingGame};
@@ -40,10 +45,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::trick_taking::{Trick, PlayerId};
-    /// use shuftlib::core::Suit;
-    /// use shuftlib::core::italian::ItalianRank;
-    /// use shuftlib::tressette::{TressetteRules, TressetteCard};
+    /// use shuftlib::{trick_taking::{Trick, PlayerId}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let cards = [
     ///     TressetteCard::new(ItalianRank::Ace, Suit::Hearts),
@@ -63,10 +65,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::trick_taking::{Trick, PlayerId};
-    /// use shuftlib::core::Suit;
-    /// use shuftlib::core::italian::ItalianRank;
-    /// use shuftlib::tressette::{TressetteRules, TressetteCard};
+    /// use shuftlib::{trick_taking::{Trick, PlayerId}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let cards = [
     ///     TressetteCard::new(ItalianRank::Ace, Suit::Hearts),
@@ -86,10 +85,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::trick_taking::{Trick, PlayerId};
-    /// use shuftlib::core::Suit;
-    /// use shuftlib::core::italian::ItalianRank;
-    /// use shuftlib::tressette::{TressetteRules, TressetteCard};
+    /// use shuftlib::{trick_taking::{Trick, PlayerId}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let cards = [
     ///     TressetteCard::new(ItalianRank::Ace, Suit::Hearts),
@@ -139,10 +135,7 @@ where
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::trick_taking::{OngoingTrick, PlayerId, TrickTakingGame};
-    /// use shuftlib::core::{Card, Suit};
-    /// use shuftlib::core::italian::ItalianRank;
-    /// use shuftlib::tressette::{TressetteRules, TressetteCard};
+    /// use shuftlib::{trick_taking::{OngoingTrick, PlayerId, TrickTakingGame}, core::{Card, Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let first_to_play = PlayerId::PLAYER_0;
     /// let card = TressetteCard::new(ItalianRank::Ace, Suit::Hearts);
@@ -174,10 +167,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::trick_taking::{OngoingTrick, PlayerId, TrickTakingGame};
-    /// use shuftlib::core::Suit;
-    /// use shuftlib::core::italian::ItalianRank;
-    /// use shuftlib::tressette::{TressetteRules, TressetteCard};
+    /// use shuftlib::{trick_taking::{OngoingTrick, PlayerId, TrickTakingGame}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let cards = [
     ///   TressetteCard::new(ItalianRank::Ace, Suit::Hearts),
@@ -206,23 +196,12 @@ where
     /// assert_eq!(trick.taker(), PlayerId::PLAYER_2);
     /// ```
     pub fn finish(self) -> Option<Trick<G>> {
-        let mut cards: [G::CardType; PLAYERS] = [G::CardType::default(); PLAYERS];
-        if self
-            .iter()
-            .enumerate()
-            .map(|(i, &x)| {
-                if let Some(c) = x {
-                    cards[i] = c;
-                    true
-                } else {
-                    false
-                }
-            })
-            .any(|is_some| !is_some)
-        {
-            return None;
-        }
-
+        let cards: [G::CardType; PLAYERS] = self
+            .cards
+            .into_iter()
+            .collect::<Option<Vec<_>>>()?
+            .try_into()
+            .ok()?;
         let taker = G::determine_taker(&cards, self.first_to_play);
         Some(Trick { cards, taker })
     }
@@ -232,8 +211,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::core::trick_taking::{OngoingTrick, PlayerId};
-    /// use shuftlib::tressette::TressetteRules;
+    /// use shuftlib::{trick_taking::{OngoingTrick, PlayerId}, tressette::TressetteRules};
     ///
     /// let trick = OngoingTrick::<TressetteRules>::new(PlayerId::PLAYER_0);
     /// assert!(trick.cards().iter().all(|c| c.is_none()));
@@ -247,8 +225,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::core::trick_taking::{OngoingTrick, PlayerId};
-    /// use shuftlib::tressette::TressetteRules;
+    /// use shuftlib::{trick_taking::{OngoingTrick, PlayerId}, tressette::TressetteRules};
     ///
     /// let trick = OngoingTrick::<TressetteRules>::new(PlayerId::PLAYER_0);
     /// assert_eq!(trick.first_to_play(), PlayerId::PLAYER_0);
@@ -262,8 +239,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::core::trick_taking::{OngoingTrick, PlayerId};
-    /// use shuftlib::tressette::TressetteRules;
+    /// use shuftlib::{trick_taking::{OngoingTrick, PlayerId}, tressette::TressetteRules};
     ///
     /// let trick = OngoingTrick::<TressetteRules>::new(PlayerId::PLAYER_0);
     /// assert_eq!(trick.next_to_play(), PlayerId::PLAYER_0);
@@ -278,8 +254,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::core::trick_taking::{OngoingTrick, PlayerId, TrickTakingGame};
-    /// use shuftlib::tressette::TressetteRules;
+    /// use shuftlib::{trick_taking::{OngoingTrick, PlayerId, TrickTakingGame}, tressette::TressetteRules};
     ///
     /// let first_to_play = PlayerId::PLAYER_0;
     /// let ongoing_trick = OngoingTrick::<TressetteRules>::new(first_to_play);

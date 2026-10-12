@@ -1,11 +1,18 @@
+//! French playing cards.
+//!
+//! Provides [`FrenchCard`](crate::core::french::FrenchCard) and
+//! [`FrenchRank`](crate::core::french::FrenchRank) for the standard 52-card French deck,
+//! plus an optional [`Joker`](crate::core::french::Joker) via
+//! [`FrenchWithJoker`](crate::core::french::FrenchWithJoker).
+
 use std::fmt::Display;
 
 use strum::{EnumIter, FromRepr};
 
 use crate::core::{Card, Suit};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// Representation of a card that goes into an French deck.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Representation of a card that goes into a French deck.
 pub struct FrenchCard {
     rank: FrenchRank,
     suit: Suit,
@@ -16,8 +23,7 @@ impl FrenchCard {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::french::{FrenchCard, FrenchRank};
-    /// use shuftlib::core::Suit;
+    /// use shuftlib::core::{french::{FrenchCard, FrenchRank}, Suit};
     ///
     /// let card = FrenchCard::new(FrenchRank::Ace, Suit::Hearts);
     /// assert_eq!(card.rank(), FrenchRank::Ace);
@@ -56,7 +62,7 @@ impl Display for FrenchCard {
 impl Card for FrenchCard {}
 
 /// A Joker card, present in some card games. Its function depends on the game.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Joker;
 
 impl Card for Joker {}
@@ -68,7 +74,7 @@ impl Display for Joker {
 }
 
 /// A variant of the French card, which can either be an actual French card or a joker.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FrenchWithJoker {
     /// A standard French card.
     Normal(FrenchCard),
@@ -97,7 +103,7 @@ impl Display for FrenchWithJoker {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, EnumIter, FromRepr, Hash)]
 #[repr(u8)]
-/// The rank of the card. In a French deck, ranks go from the ace to 10, then there is a jack, queen and king,
+/// The rank of the card. In a French deck, ranks go from the ace to 10, then there is a jack, queen and king.
 /// In most games they each have a different value that depends on the game itself.
 pub enum FrenchRank {
     /// 1

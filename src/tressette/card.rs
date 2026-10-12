@@ -1,7 +1,7 @@
 //! Card implementation for the Tressette game.
 //!
-//! This module provides [`TressetteCard`], a wrapper around [`ItalianCard`] that implements
-//! Tressette-specific ordering and scoring rules.
+//! This module provides [`TressetteCard`], a wrapper around [`ItalianCard`](crate::core::italian::ItalianCard)
+//! that implements Tressette-specific ordering and scoring rules.
 
 use std::{cmp::Ordering, fmt::Display, ops::Deref};
 
@@ -17,9 +17,7 @@ use num_rational::Rational32;
 /// # Examples
 ///
 /// ```
-/// use shuftlib::tressette::TressetteCard;
-/// use shuftlib::core::Suit;
-/// use shuftlib::core::italian::ItalianRank;
+/// use shuftlib::{tressette::TressetteCard, core::{Suit, italian::ItalianRank}};
 ///
 /// let ace = TressetteCard::new(ItalianRank::Ace, Suit::Hearts);
 /// let three = TressetteCard::new(ItalianRank::Three, Suit::Hearts);
@@ -47,9 +45,7 @@ impl Ord for TressetteCard {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::tressette::TressetteCard;
-    /// use shuftlib::core::Suit;
-    /// use shuftlib::core::italian::ItalianRank;
+    /// use shuftlib::{tressette::TressetteCard, core::{Suit, italian::ItalianRank}};
     ///
     /// // Test all adjacent pairs (transitivity guarantees full ordering)
     /// let four = TressetteCard::new(ItalianRank::Four, Suit::Hearts);
@@ -99,9 +95,7 @@ impl Display for TressetteCard {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::tressette::TressetteCard;
-    /// use shuftlib::core::Suit;
-    /// use shuftlib::core::italian::ItalianRank;
+    /// use shuftlib::{tressette::TressetteCard, core::{Suit, italian::ItalianRank}};
     ///
     /// let card = TressetteCard::new(ItalianRank::Ace, Suit::Hearts);
     /// assert_eq!(format!("{}", card), "1H");
@@ -119,9 +113,7 @@ impl From<ItalianCard> for TressetteCard {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::tressette::TressetteCard;
-    /// use shuftlib::core::Suit;
-    /// use shuftlib::core::italian::{ItalianCard, ItalianRank};
+    /// use shuftlib::{tressette::TressetteCard, core::{Suit, italian::{ItalianCard, ItalianRank}}};
     ///
     /// let italian_card = ItalianCard::new(ItalianRank::King, Suit::Clubs);
     /// let tressette_card: TressetteCard = italian_card.into();
@@ -150,9 +142,7 @@ impl TressetteCard {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::tressette::TressetteCard;
-    /// use shuftlib::core::Suit;
-    /// use shuftlib::core::italian::ItalianRank;
+    /// use shuftlib::{tressette::TressetteCard, core::{Suit, italian::ItalianRank}};
     /// use num_rational::Rational32;
     ///
     /// let ace = TressetteCard::new(ItalianRank::Ace, Suit::Hearts);
@@ -168,9 +158,9 @@ impl TressetteCard {
             ItalianRank::Ace => Rational32::new(3, 3),
             ItalianRank::Two
             | ItalianRank::Three
-            | ItalianRank::King
+            | ItalianRank::Jack
             | ItalianRank::Knight
-            | ItalianRank::Jack => Rational32::new(1, 3),
+            | ItalianRank::King => Rational32::new(1, 3),
             ItalianRank::Four | ItalianRank::Five | ItalianRank::Six | ItalianRank::Seven => {
                 Rational32::new(0, 3)
             }
@@ -182,9 +172,7 @@ impl TressetteCard {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::core::Suit;
-    /// use shuftlib::core::italian::{ItalianCard, ItalianRank};
-    /// use shuftlib::tressette::TressetteCard;
+    /// use shuftlib::{core::{Suit, italian::{ItalianCard, ItalianRank}}, tressette::TressetteCard};
     ///
     /// let card = TressetteCard::new(ItalianRank::Ace, Suit::Spades);
     /// assert_eq!(*card, ItalianCard::new(ItalianRank::Ace, Suit::Spades));

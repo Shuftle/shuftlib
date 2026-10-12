@@ -1,7 +1,7 @@
 //! Tressette card game implementation.
 //!
 //! This module contains the core types and logic for playing tressette,
-//! including card representations, game rules, position management, and
+//! including card representations, game rules, move validation, and
 //! high-level game state.
 
 /// Card representation for tressette.
