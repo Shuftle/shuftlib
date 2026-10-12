@@ -1,15 +1,20 @@
+//! Player identification and per-player hand management.
+//!
+//! [`PlayerId`] identifies one of the [`PLAYERS`] seats at the table; [`Player`] holds
+//! the cards currently in that seat's hand.
+
 use std::{fmt::Display, ops::Add};
 
 use anyhow::bail;
 
 use crate::trick_taking::TrickTakingGame;
 
-/// Number of players in all games.
+/// Number of players at the table.
 pub const PLAYERS: usize = 4;
 
 /// Represents a player of a game. This type is generic over the type of the
 /// card used for the specific game.
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Player<G>
 where
     G: TrickTakingGame,
@@ -28,10 +33,7 @@ where
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::trick_taking::{Player, TrickTakingGame, PlayerId};
-    /// use shuftlib::core::Suit;
-    /// use shuftlib::core::italian::ItalianRank;
-    /// use shuftlib::tressette::{TressetteRules, TressetteCard};
+    /// use shuftlib::{trick_taking::{Player, TrickTakingGame, PlayerId}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let player_id = PlayerId::PLAYER_0;
     /// let mut player = Player::<TressetteRules>::new(player_id);
@@ -53,10 +55,7 @@ where
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::trick_taking::{Player, TrickTakingGame, PlayerId};
-    /// use shuftlib::core::Suit;
-    /// use shuftlib::core::italian::ItalianRank;
-    /// use shuftlib::tressette::{TressetteRules, TressetteCard};
+    /// use shuftlib::{trick_taking::{Player, TrickTakingGame, PlayerId}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let player_id = PlayerId::PLAYER_0;
     /// let mut player = Player::<TressetteRules>::new(player_id);
@@ -89,8 +88,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::trick_taking::{Player, PlayerId};
-    /// use shuftlib::tressette::TressetteRules;
+    /// use shuftlib::{trick_taking::{Player, PlayerId}, tressette::TressetteRules};
     ///
     /// let player = Player::<TressetteRules>::new(PlayerId::PLAYER_0);
     /// assert_eq!(player.hand().len(), 0);
@@ -104,8 +102,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::trick_taking::{Player, PlayerId};
-    /// use shuftlib::tressette::TressetteRules;
+    /// use shuftlib::{trick_taking::{Player, PlayerId}, tressette::TressetteRules};
     ///
     /// let player = Player::<TressetteRules>::new(PlayerId::PLAYER_0);
     /// assert_eq!(player.id(), PlayerId::PLAYER_0);
@@ -149,6 +146,23 @@ impl PlayerId {
     pub const PLAYER_2: Self = PlayerId(2);
     /// Player ID constant for player 3.
     pub const PLAYER_3: Self = PlayerId(3);
+
+    /// All player IDs, in order. Useful for converting a `usize` known to be
+    /// in range (e.g. an array index from iterating a `[T; PLAYERS]`) into a
+    /// `PlayerId` without the fallible `TryFrom<usize>` conversion.
+    ///
+    /// # Examples
+    /// ```
+    /// use shuftlib::trick_taking::PlayerId;
+    ///
+    /// assert_eq!(PlayerId::ALL[2], PlayerId::PLAYER_2);
+    /// ```
+    pub const ALL: [Self; PLAYERS] = [
+        Self::PLAYER_0,
+        Self::PLAYER_1,
+        Self::PLAYER_2,
+        Self::PLAYER_3,
+    ];
 
     /// This method simply increments `self` by 1. Note that `PlayerId` can only
     /// be in the range 0..N, so incrementing `self` when the value is N-1, will

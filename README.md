@@ -28,4 +28,4 @@ Documentation is at [docs.rs/shuftlib](https://docs.rs/shuftlib).
 
 Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0-only).
 
-See the [LICENSE](LICENSE) file for details.
+See the [LICENSE](https://github.com/Shuftle/shuftlib/blob/main/LICENSE) file for details.

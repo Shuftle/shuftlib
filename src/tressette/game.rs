@@ -1,12 +1,8 @@
 //! High-level game state management for Tressette.
 
 use crate::{
-    core::{
-        Suit,
-        deck::Deck,
-        trick_taking::{Hand, OngoingHand, OngoingTrick, PLAYERS, PlayerId, TrickTakingGame},
-    },
-    trick_taking::Player,
+    core::{Suit, deck::Deck},
+    trick_taking::{Hand, OngoingHand, OngoingTrick, PLAYERS, Player, PlayerId, TrickTakingGame},
 };
 
 use super::{TressetteCard, TressetteRules};
@@ -81,7 +77,7 @@ pub enum Error {
 /// The state of a Tressette game at a given point.
 ///
 /// This includes the players' hands, the current trick, scores, history, and other game state.
-#[derive(Debug, Clone, bon::Builder)]
+#[derive(Debug, Clone)]
 pub struct Game {
     deck: Deck<TressetteCard>,
     players: [Player<TressetteRules>; PLAYERS],
@@ -91,6 +87,8 @@ pub struct Game {
     score: (u8, u8),
     completed_hands: Vec<Hand<TressetteRules>>,
     history: Vec<(TressetteCard, MoveEffect)>,
+    /// Seed used for all randomness at construction, enabling deterministic replay.
+    seed: u64,
 }
 
 impl Game {
@@ -104,14 +102,22 @@ impl Game {
     /// let game = Game::new();
     /// assert_eq!(game.score(), (0, 0));
     /// ```
-    #[allow(clippy::expect_used)]
-    /// # Panics
-    ///
-    /// Panics if the random number generator produces a value outside the valid range for PlayerID.
-    /// This should never happen in practice.
     pub fn new() -> Self {
-        let dealing_player = PlayerId::try_from(rand::random_range(0..3))
-            .expect("Failed to create random PlayerID. This is a bug.");
+        Self::from_seed(rand::random())
+    }
+
+    /// Creates a new game from a specific seed, enabling deterministic replay.
+    fn from_seed(seed: u64) -> Self {
+        use rand::RngExt;
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+        use rand::seq::SliceRandom;
+
+        let mut rng = StdRng::seed_from_u64(seed);
+        let dealing_player = PlayerId::ALL[rng.random_range(0..PLAYERS)];
+        let mut cards: Vec<_> = TressetteRules::deck().into_iter().collect();
+        cards.shuffle(&mut rng);
+        let deck = Deck::from(cards);
         let mut game = Self {
             players: [
                 Player::new(PlayerId::PLAYER_0),
@@ -119,15 +125,16 @@ impl Game {
                 Player::new(PlayerId::PLAYER_2),
                 Player::new(PlayerId::PLAYER_3),
             ],
-            current_hand: OngoingHand::new(),
+            // Placeholder, immediately overwritten by `initialize_new_hand` below.
+            current_hand: OngoingHand::new(dealing_player),
             score: (0, 0),
             completed_hands: Vec::new(),
             history: Vec::new(),
             dealing_player,
-            deck: TressetteRules::deck(),
+            deck,
+            seed,
         };
         game.initialize_new_hand();
-        game.deck.shuffle();
         game.deal();
         game
     }
@@ -142,16 +149,8 @@ impl Game {
     /// let game = Game::new();
     /// let player = game.current_player();
     /// ```
-    /// # Panics
-    ///
-    /// Panics if the current trick is not initialized. This indicates a bug in the game logic.
-    #[allow(clippy::expect_used)]
     pub fn current_player(&self) -> PlayerId {
-        self.current_hand
-            .current_trick()
-            .as_ref()
-            .expect("Current trick was not initialized. This is a bug.")
-            .next_to_play()
+        self.current_hand.current_trick().next_to_play()
     }
 
     /// Returns the current scores: (team_0_2_score, team_1_3_score).
@@ -182,7 +181,6 @@ impl Game {
     /// let game = Game::new();
     /// assert_eq!(game.status(), Status::Ongoing);
     /// ```
-    #[allow(clippy::expect_used)]
     pub fn status(&self) -> Status {
         if TressetteRules::is_game_over(self.score) {
             let winner = if self.score.0 > self.score.1 {
@@ -205,8 +203,7 @@ impl Game {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::tressette::Game;
-    /// use shuftlib::trick_taking::PlayerId;
+    /// use shuftlib::{tressette::Game, trick_taking::PlayerId};
     ///
     /// let game = Game::new();
     /// let hand = game.hand(PlayerId::PLAYER_0);
@@ -230,11 +227,7 @@ impl Game {
     /// assert!(trick.iter().all(|c| c.is_none()));
     /// ```
     pub fn current_trick(&self) -> &[Option<TressetteCard>; PLAYERS] {
-        self.current_hand
-            .current_trick()
-            .as_ref()
-            .map(|ot| ot as &[Option<TressetteCard>; PLAYERS])
-            .unwrap_or(&[None; PLAYERS])
+        self.current_hand.current_trick()
     }
 
     /// Returns the player who led the current trick.
@@ -242,22 +235,13 @@ impl Game {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::tressette::Game;
-    /// use shuftlib::trick_taking::{PlayerId, PLAYERS};
+    /// use shuftlib::{tressette::Game, trick_taking::{PlayerId, PLAYERS}};
     ///
     /// let game = Game::new();
     /// assert!(game.trick_leader().as_usize() < PLAYERS);
     /// ```
-    /// # Panics
-    ///
-    /// Panics if the current trick is not initialized. This indicates a bug in the game logic.
-    #[allow(clippy::expect_used)]
     pub fn trick_leader(&self) -> PlayerId {
-        self.current_hand
-            .current_trick()
-            .as_ref()
-            .expect("Current trick was not initialized. This is a bug.")
-            .first_to_play()
+        self.current_hand.current_trick().first_to_play()
     }
 
     /// Returns the number of tricks completed in the current hand.
@@ -315,8 +299,10 @@ impl Game {
         let leading_suit = self
             .current_hand
             .current_trick()
-            .as_ref()
-            .and_then(|ot| ot.iter().flatten().next().map(|c| c.suit()));
+            .iter()
+            .flatten()
+            .next()
+            .map(|c| c.suit());
 
         match leading_suit {
             Some(suit) => {
@@ -340,10 +326,7 @@ impl Game {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::tressette::Game;
-    /// use shuftlib::core::Suit;
-    /// use shuftlib::core::italian::ItalianRank;
-    /// use shuftlib::tressette::TressetteCard;
+    /// use shuftlib::{tressette::{Game, TressetteCard}, core::{Suit, italian::ItalianRank}};
     ///
     /// let game = Game::new();
     /// let card = game.hand(game.current_player())[0];
@@ -374,10 +357,6 @@ impl Game {
     /// - The card is not in the current player's hand ([`Error::CardNotInHand`]).
     /// - The player must follow suit but didn't ([`Error::MustFollowSuit`]).
     /// - Internal state is inconsistent ([`Error::InternalError`]).
-    /// # Panics
-    ///
-    /// Panics if a card that was validated to be in the player's hand cannot be found.
-    /// This indicates a bug in the validation logic.
     pub fn play_card(&mut self, card: TressetteCard) -> Result<MoveEffect, Error> {
         // Check game not over
         if matches!(self.status(), Status::Finished { .. }) {
@@ -406,21 +385,17 @@ impl Game {
 
         // Apply move
         let player = &mut self.players[self.current_player().as_usize()];
-        #[allow(clippy::expect_used)]
         let card_idx = player
             .hand()
             .iter()
             .position(|&c| c == card)
-            .expect("Card should be in hand");
-        player.remove_card(card_idx);
+            .ok_or_else(|| Error::InternalError("Card should be in hand".to_string()))?;
+        player.remove_card(card_idx).ok_or_else(|| {
+            Error::InternalError("remove_card failed after index was already validated".to_string())
+        })?;
 
         // Add to trick
-        if let Some(ot) = self.current_hand.current_trick_mut().as_mut() {
-            ot.play(card);
-        } else {
-            // Should not happen
-            return Err(Error::InternalError("No current trick".to_string()));
-        }
+        self.current_hand.current_trick_mut().play(card);
 
         // Check if trick is complete
         let effect = if self.is_trick_complete() {
@@ -439,8 +414,10 @@ impl Game {
     fn leading_suit(&self) -> Option<Suit> {
         self.current_hand
             .current_trick()
-            .as_ref()
-            .and_then(|ot| ot.iter().flatten().next().map(|c| c.suit()))
+            .iter()
+            .flatten()
+            .next()
+            .map(|c| c.suit())
     }
 
     /// Returns the card history.
@@ -479,11 +456,9 @@ impl Game {
             return None;
         }
 
-        let mut game = Game::new();
+        let mut game = Self::from_seed(self.seed);
         for (card, _) in &self.history[..n] {
-            if game.play_card(*card).is_err() {
-                return None;
-            }
+            game.play_card(*card).ok()?;
         }
         Some(game)
     }
@@ -491,18 +466,14 @@ impl Game {
     fn is_trick_complete(&self) -> bool {
         self.current_hand
             .current_trick()
-            .as_ref()
-            .map(|ot| ot.iter().all(|c| c.is_some()))
-            .unwrap_or(false)
+            .iter()
+            .all(|c| c.is_some())
     }
 
     fn complete_trick(&mut self) -> Result<MoveEffect, Error> {
         // Finish the current trick
-        let trick = self
-            .current_hand
-            .current_trick()
-            .as_ref()
-            .and_then(|ot| ot.clone().finish())
+        let trick = (*self.current_hand.current_trick())
+            .finish()
             .ok_or_else(|| Error::InternalError("Trick not complete".to_string()))?;
 
         // Determine winner using game rules
@@ -519,7 +490,7 @@ impl Game {
 
         // Start new trick
         self.current_hand
-            .set_current_trick(Some(OngoingTrick::new(winner)));
+            .set_current_trick(OngoingTrick::new(winner));
 
         // Check if hand is complete (all cards played)
         if self.players.iter().all(|p| p.hand().is_empty()) {
@@ -530,11 +501,9 @@ impl Game {
     }
 
     fn complete_hand(&mut self, last_trick_winner: PlayerId) -> Result<MoveEffect, Error> {
-        // Finish the current hand
+        // Finish the current hand.
         let hand = self
             .current_hand
-            // TODO: is it possible to remove this clone?
-            .clone()
             .finish()
             .ok_or_else(|| Error::InternalError("Hand not complete".to_string()))?;
 
@@ -591,10 +560,8 @@ impl Game {
 
     /// Resets the hand state and prepares for a new hand.
     fn initialize_new_hand(&mut self) {
-        self.current_hand = OngoingHand::new();
         self.dealing_player.inc();
-        self.current_hand
-            .set_current_trick(Some(OngoingTrick::new(self.dealing_player + 1)));
+        self.current_hand = OngoingHand::new(self.dealing_player + 1);
     }
 }
 
@@ -652,7 +619,7 @@ mod tests {
         game.players[1].give(spades_two);
         let mut ongoing_trick = OngoingTrick::new(PlayerId::PLAYER_0);
         ongoing_trick.play(hearts_ace);
-        game.current_hand.set_current_trick(Some(ongoing_trick));
+        game.current_hand.set_current_trick(ongoing_trick);
 
         // Player has hearts, must play hearts
         let result = game.play_card(spades_two);

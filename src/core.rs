@@ -2,7 +2,6 @@
 //!
 //! This module contains the fundamental building blocks for card games:
 //! - Generic card types, suits, ranks, and decks (applicable to any card game)
-//! - Trick-taking game mechanics (players, tricks, hands)
 
 use std::fmt::{Debug, Display};
 use strum::EnumIter;
@@ -16,10 +15,6 @@ pub mod french;
 
 /// Generic deck container and operations.
 pub mod deck;
-
-/// Trick-taking game mechanics including players, tricks, and hands.
-/// Contains specific types and traits for trick-taking games.
-pub use crate::trick_taking;
 
 /// A trait representing a card. The actual implementation depends on the game where this is used.
 ///
@@ -65,15 +60,11 @@ impl Display for Suit {
 #[cfg(test)]
 pub mod test_utils {
     use super::Suit;
-    use proptest::prelude::*;
+    use proptest::{prelude::*, sample};
+    use strum::IntoEnumIterator;
 
     /// Generates a random suit strategy for property testing.
     pub fn suit_strategy() -> impl Strategy<Value = Suit> {
-        prop_oneof![
-            Just(Suit::Hearts),
-            Just(Suit::Diamonds),
-            Just(Suit::Clubs),
-            Just(Suit::Spades),
-        ]
+        sample::select(Suit::iter().collect::<Vec<_>>())
     }
 }

@@ -1,3 +1,9 @@
+//! Italian playing cards.
+//!
+//! Provides [`ItalianCard`](crate::core::italian::ItalianCard) and
+//! [`ItalianRank`](crate::core::italian::ItalianRank) for the 40-card Italian deck
+//! (ace through seven, then jack, knight, and king).
+
 use std::fmt::Display;
 
 use strum::{EnumIter, FromRepr};
@@ -16,8 +22,7 @@ impl ItalianCard {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::italian::{ItalianCard, ItalianRank};
-    /// use shuftlib::core::Suit;
+    /// use shuftlib::core::{italian::{ItalianCard, ItalianRank}, Suit};
     ///
     /// let card = ItalianCard::new(ItalianRank::Ace, Suit::Hearts);
     /// assert_eq!(card.rank(), ItalianRank::Ace);
@@ -57,7 +62,7 @@ impl Card for ItalianCard {}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, EnumIter, FromRepr, Hash)]
 #[repr(u8)]
-/// The rank of the card. In an Italian deck, ranks go from the ace to the 7, then they also have a jack, knight and king,
+/// The rank of the card. In an Italian deck, ranks go from the ace to the 7, then they also have a jack, knight and king.
 /// In most games they each have a different value that depends on the game itself.
 pub enum ItalianRank {
     /// 1
@@ -87,33 +92,19 @@ pub enum ItalianRank {
 pub mod test_utils {
     use super::ItalianRank;
     use proptest::prelude::*;
+    use proptest::sample;
+    use strum::IntoEnumIterator;
 
     /// Generates a random Italian rank strategy for property testing.
     pub fn italian_rank_strategy() -> impl Strategy<Value = ItalianRank> {
-        prop_oneof![
-            Just(ItalianRank::Ace),
-            Just(ItalianRank::Two),
-            Just(ItalianRank::Three),
-            Just(ItalianRank::Four),
-            Just(ItalianRank::Five),
-            Just(ItalianRank::Six),
-            Just(ItalianRank::Seven),
-            Just(ItalianRank::Jack),
-            Just(ItalianRank::Knight),
-            Just(ItalianRank::King),
-        ]
+        sample::select(ItalianRank::iter().collect::<Vec<_>>())
     }
 
     /// Generates a random Italian card strategy for property testing.
     pub fn italian_card_strategy() -> impl Strategy<Value = super::ItalianCard> {
         (
             italian_rank_strategy(),
-            prop_oneof![
-                Just(super::super::Suit::Hearts),
-                Just(super::super::Suit::Clubs),
-                Just(super::super::Suit::Spades),
-                Just(super::super::Suit::Diamonds),
-            ],
+            sample::select(super::super::Suit::iter().collect::<Vec<_>>()),
         )
             .prop_map(|(rank, suit)| super::ItalianCard::new(rank, suit))
     }
