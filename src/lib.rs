@@ -11,7 +11,5 @@
 #![doc = include_str!("../README.md")]
 
 pub mod cards;
-/// Contains the logic for the tressette game.
+pub mod engine;
 pub mod tressette;
-/// Trick-taking game mechanics available at the crate root.
-pub mod trick_taking;

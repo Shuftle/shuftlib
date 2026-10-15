@@ -68,7 +68,9 @@ impl Display for ItalianCard {
 impl Card for ItalianCard {}
 
 /// The four suits of the Italian deck.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// Suits are ordered as listed: the deck order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Suit {
     /// Denari.
     Coins,
@@ -179,5 +181,22 @@ pub mod test_utils {
     pub fn italian_card_strategy() -> impl Strategy<Value = ItalianCard> {
         (italian_rank_strategy(), suit_strategy())
             .prop_map(|(rank, suit)| ItalianCard::new(rank, suit))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use crate::cards::deck::Deck;
+
+    #[test]
+    fn the_deck_has_forty_distinct_cards_with_distinct_names() {
+        let deck = Deck::italian();
+        let cards: HashSet<_> = deck.iter().copied().collect();
+        let names: HashSet<_> = deck.iter().map(ToString::to_string).collect();
+        assert_eq!(deck.len(), 40);
+        assert_eq!(cards.len(), 40);
+        assert_eq!(names.len(), 40);
     }
 }

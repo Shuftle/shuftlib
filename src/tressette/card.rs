@@ -10,8 +10,9 @@ use crate::cards::{Card, italian::Suit};
 
 /// A card in the Tressette game.
 ///
-/// Wraps an [`ItalianCard`] and implements Tressette-specific ordering where:
-/// 4 < 5 < 6 < 7 < Jack < Knight < King < Ace < 2 < 3
+/// Wraps an [`ItalianCard`] and implements Tressette-specific ordering: cards
+/// are ordered by suit, then by strength, which within a suit is
+/// 4 < 5 < 6 < 7 < Jack < Knight < King < Ace < 2 < 3.
 ///
 /// # Examples
 ///
@@ -36,10 +37,12 @@ impl PartialOrd for TressetteCard {
 }
 
 impl Ord for TressetteCard {
-    /// Compare cards by Tressette rank ordering.
+    /// Compares cards by suit, then by Tressette strength.
     ///
-    /// In Tressette, the rank order from lowest to highest is:
-    /// 4 < 5 < 6 < 7 < Jack < Knight < King < Ace < 2 < 3
+    /// Within a suit, the order from weakest to strongest is:
+    /// 4 < 5 < 6 < 7 < Jack < Knight < King < Ace < 2 < 3. Only cards of the
+    /// same suit compete for a trick, so the order between suits is just
+    /// the deck order, to keep the ordering consistent with equality.
     ///
     /// # Examples
     ///
@@ -84,7 +87,7 @@ impl Ord for TressetteCard {
             }
         }
 
-        rank_order(self.rank()).cmp(&rank_order(other.rank()))
+        (self.suit(), rank_order(self.rank())).cmp(&(other.suit(), rank_order(other.rank())))
     }
 }
 

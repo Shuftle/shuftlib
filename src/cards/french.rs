@@ -180,7 +180,9 @@ impl Display for FrenchRank {
 }
 
 /// The four suits of the French deck.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// Suits are ordered as listed: the deck order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Suit {
     /// Hearts.
     Hearts,
