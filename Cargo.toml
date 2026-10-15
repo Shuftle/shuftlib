@@ -16,7 +16,6 @@ repository = "https://github.com/shuftle/shuftlib"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0.104"
 rand="0.10"
 thiserror = "2.0"
 

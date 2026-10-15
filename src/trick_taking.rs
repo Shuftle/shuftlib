@@ -22,11 +22,11 @@ pub trait TrickTakingGame {
     /// taker) of the trick. The taker is generally determined by the cards that
     /// have been played and it can depend by the order in which the players
     /// played their cards.
-    fn determine_taker(cards: &[Self::CardType; PLAYERS], first_to_play: PlayerId) -> PlayerId;
+    fn determine_taker(cards: &[Self::CardType; PLAYERS], first_to_play: Seat) -> Seat;
 
     /// Calculate the score for a completed hand.
     ///
-    /// Returns the updated scores for both teams: (team_0_2_score, team_1_3_score).
+    /// Returns the updated scores for both teams: (North-South, East-West).
     fn score_hand(hand: &Hand<Self>) -> (u8, u8)
     where
         Self: Sized;
@@ -42,7 +42,7 @@ pub trait TrickTakingGame {
 
 /// Generic player management and identification.
 pub mod player;
-pub use player::{PLAYERS, Player, PlayerId};
+pub use player::{PLAYERS, Player, Seat, Team};
 
 /// Trick and ongoing trick state management.
 pub mod trick;

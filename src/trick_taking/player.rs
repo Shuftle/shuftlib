@@ -1,11 +1,9 @@
 //! Player identification and per-player hand management.
 //!
-//! [`PlayerId`] identifies one of the [`PLAYERS`] seats at the table; [`Player`] holds
-//! the cards currently in that seat's hand.
+//! [`Seat`] names one of the [`PLAYERS`] seats at the table, and [`Team`] one of
+//! the two partnerships; [`Player`] holds the cards currently in a seat's hand.
 
-use std::{fmt::Display, ops::Add};
-
-use anyhow::bail;
+use std::fmt::Display;
 
 use crate::trick_taking::TrickTakingGame;
 
@@ -14,7 +12,7 @@ pub const PLAYERS: usize = 4;
 
 /// Represents a player of a game. This type is generic over the type of the
 /// card used for the specific game.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Player<G>
 where
     G: TrickTakingGame,
@@ -22,7 +20,7 @@ where
     /// The cards held in the player's hand.
     hand: Vec<G::CardType>,
     /// The ID of this player.
-    id: PlayerId,
+    id: Seat,
 }
 
 impl<G> Player<G>
@@ -33,10 +31,10 @@ where
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::{trick_taking::{Player, TrickTakingGame, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{Player, TrickTakingGame, Seat}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
-    /// let player_id = PlayerId::PLAYER_0;
-    /// let mut player = Player::<TressetteRules>::new(player_id);
+    /// let seat = Seat::North;
+    /// let mut player = Player::<TressetteRules>::new(seat);
     /// // Players have no cards when created.
     /// assert_eq!(player.hand().len(), 0);
     ///
@@ -55,10 +53,10 @@ where
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::{trick_taking::{Player, TrickTakingGame, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{Player, TrickTakingGame, Seat}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
-    /// let player_id = PlayerId::PLAYER_0;
-    /// let mut player = Player::<TressetteRules>::new(player_id);
+    /// let seat = Seat::North;
+    /// let mut player = Player::<TressetteRules>::new(seat);
     ///
     /// let card1 = TressetteCard::new(ItalianRank::Ace, Suit::Swords);
     /// let card2 = TressetteCard::new(ItalianRank::King, Suit::Cups);
@@ -88,9 +86,9 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{Player, PlayerId}, tressette::TressetteRules};
+    /// use shuftlib::{trick_taking::{Player, Seat}, tressette::TressetteRules};
     ///
-    /// let player = Player::<TressetteRules>::new(PlayerId::PLAYER_0);
+    /// let player = Player::<TressetteRules>::new(Seat::North);
     /// assert_eq!(player.hand().len(), 0);
     /// ```
     pub fn hand(&self) -> &[G::CardType] {
@@ -102,30 +100,30 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{Player, PlayerId}, tressette::TressetteRules};
+    /// use shuftlib::{trick_taking::{Player, Seat}, tressette::TressetteRules};
     ///
-    /// let player = Player::<TressetteRules>::new(PlayerId::PLAYER_0);
-    /// assert_eq!(player.id(), PlayerId::PLAYER_0);
+    /// let player = Player::<TressetteRules>::new(Seat::North);
+    /// assert_eq!(player.id(), Seat::North);
     /// ```
-    pub fn id(&self) -> PlayerId {
+    pub fn id(&self) -> Seat {
         self.id
     }
 
-    /// Generates a new player from a `PlayerId`. Players are initialized with
+    /// Generates a new player from a `Seat`. Players are initialized with
     /// no cards.
     ///
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{Player, PlayerId, TrickTakingGame}, tressette::TressetteRules};
+    /// use shuftlib::{trick_taking::{Player, Seat, TrickTakingGame}, tressette::TressetteRules};
     ///
-    /// let id = PlayerId::PLAYER_0;
+    /// let id = Seat::North;
     /// let player = Player::<TressetteRules>::new(id);
     ///
-    /// assert_eq!(player.id().as_usize(), 0);
+    /// assert_eq!(player.id().index(), 0);
     /// assert_eq!(player.hand().len(), 0);
     /// ```
-    pub fn new(id: PlayerId) -> Self {
+    pub fn new(id: Seat) -> Self {
         Self {
             id,
             hand: Vec::new(),
@@ -133,133 +131,158 @@ where
     }
 }
 
-/// A player id can only be in the range 0..4.
-#[derive(Default, Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
-pub struct PlayerId(usize);
+/// A seat at the table. Partners sit opposite each other: North with South,
+/// East with West. Play goes counter-clockwise, as is customary for Italian
+/// games: North, West, South, East.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub enum Seat {
+    /// Partner of South.
+    North,
+    /// Partner of West.
+    East,
+    /// Partner of North.
+    South,
+    /// Partner of East.
+    West,
+}
 
-impl PlayerId {
-    /// Player ID constant for player 0.
-    pub const PLAYER_0: Self = PlayerId(0);
-    /// Player ID constant for player 1.
-    pub const PLAYER_1: Self = PlayerId(1);
-    /// Player ID constant for player 2.
-    pub const PLAYER_2: Self = PlayerId(2);
-    /// Player ID constant for player 3.
-    pub const PLAYER_3: Self = PlayerId(3);
-
-    /// All player IDs, in order. Useful for converting a `usize` known to be
-    /// in range (e.g. an array index from iterating a `[T; PLAYERS]`) into a
-    /// `PlayerId` without the fallible `TryFrom<usize>` conversion.
+impl Seat {
+    /// Every seat, in play order from North.
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::trick_taking::PlayerId;
+    /// use shuftlib::trick_taking::Seat;
     ///
-    /// assert_eq!(PlayerId::ALL[2], PlayerId::PLAYER_2);
+    /// assert_eq!(Seat::ALL, [Seat::North, Seat::West, Seat::South, Seat::East]);
     /// ```
-    pub const ALL: [Self; PLAYERS] = [
-        Self::PLAYER_0,
-        Self::PLAYER_1,
-        Self::PLAYER_2,
-        Self::PLAYER_3,
-    ];
+    pub const ALL: [Self; PLAYERS] = [Self::North, Self::West, Self::South, Self::East];
 
-    /// This method simply increments `self` by 1. Note that `PlayerId` can only
-    /// be in the range 0..N, so incrementing `self` when the value is N-1, will
-    /// reset its value to 0, since the purpose of this type is to determine the
-    /// player's turn and the first person to play is not necessarily the person
-    /// with ID = 0.
+    /// Returns the seat that plays after this one.
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::trick_taking::PlayerId;
+    /// use shuftlib::trick_taking::Seat;
     ///
-    /// let mut player_id = PlayerId::PLAYER_0;
-    /// player_id.inc();
-    /// assert_eq!(player_id, PlayerId::PLAYER_1);
-    /// player_id.inc();
-    /// player_id.inc();
-    /// player_id.inc();
-    /// assert_eq!(player_id, PlayerId::PLAYER_0);
+    /// assert_eq!(Seat::North.next(), Seat::West);
+    /// assert_eq!(Seat::East.next(), Seat::North);
     /// ```
-    pub fn inc(&mut self) {
-        if self.0 < PLAYERS - 1 {
-            self.0 += 1;
-        } else {
-            self.0 = 0;
+    pub const fn next(self) -> Self {
+        match self {
+            Self::North => Self::West,
+            Self::West => Self::South,
+            Self::South => Self::East,
+            Self::East => Self::North,
         }
     }
 
-    /// Returns the next player ID by incrementing this one.
-    /// Note that `PlayerId` wraps around from N-1 to 0.
+    /// Returns the seat `steps` turns after this one.
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::trick_taking::PlayerId;
+    /// use shuftlib::trick_taking::Seat;
     ///
-    /// let player_id = PlayerId::PLAYER_0;
-    /// assert_eq!(player_id.next(), PlayerId::PLAYER_1);
-    ///
-    /// let last_player = PlayerId::PLAYER_3;
-    /// assert_eq!(last_player.next(), PlayerId::PLAYER_0);
+    /// assert_eq!(Seat::East.after(2), Seat::West);
+    /// assert_eq!(Seat::East.after(4), Seat::East);
     /// ```
-    pub fn next(mut self) -> Self {
-        self.inc();
-        self
+    pub fn after(self, steps: usize) -> Self {
+        Self::ALL[(self.index() + steps) % PLAYERS]
     }
 
-    /// Returns the underlying usize value of this PlayerId.
+    /// Returns the seat's position in [`ALL`](Self::ALL), the play order from
+    /// North. Values kept for each seat are stored in this order.
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::trick_taking::PlayerId;
+    /// use shuftlib::trick_taking::Seat;
     ///
-    /// let player_id = PlayerId::PLAYER_2;
-    /// assert_eq!(player_id.as_usize(), 2);
+    /// assert_eq!(Seat::North.index(), 0);
+    /// assert_eq!(Seat::West.index(), 1);
     /// ```
-    pub fn as_usize(&self) -> usize {
-        self.0
+    pub const fn index(self) -> usize {
+        match self {
+            Self::North => 0,
+            Self::West => 1,
+            Self::South => 2,
+            Self::East => 3,
+        }
     }
-}
 
-impl Add<usize> for PlayerId {
-    type Output = Self;
-
-    fn add(self, rhs: usize) -> Self::Output {
-        let sum = self.0 + rhs;
-        PlayerId(sum % PLAYERS)
-    }
-}
-
-impl TryFrom<usize> for PlayerId {
-    type Error = anyhow::Error;
-
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        if (0..PLAYERS).contains(&value) {
-            Ok(PlayerId(value))
-        } else {
-            bail!(
-                "Tried to convert {} into a PlayerId, but acceptable values are in range 0..{PLAYERS}",
-                value
-            )
+    /// Returns the team this seat plays for.
+    ///
+    /// # Examples
+    /// ```
+    /// use shuftlib::trick_taking::{Seat, Team};
+    ///
+    /// assert_eq!(Seat::South.team(), Team::NorthSouth);
+    /// assert_eq!(Seat::West.team(), Team::EastWest);
+    /// ```
+    pub const fn team(self) -> Team {
+        match self {
+            Self::North | Self::South => Team::NorthSouth,
+            Self::East | Self::West => Team::EastWest,
         }
     }
 }
 
-impl Display for PlayerId {
+impl Display for Seat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        let name = match self {
+            Self::North => "North",
+            Self::East => "East",
+            Self::South => "South",
+            Self::West => "West",
+        };
+        f.write_str(name)
+    }
+}
+
+/// One of the two partnerships.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Team {
+    /// North and South.
+    NorthSouth,
+    /// East and West.
+    EastWest,
+}
+
+impl Team {
+    /// Both teams.
+    pub const ALL: [Self; 2] = [Self::NorthSouth, Self::EastWest];
+
+    /// Returns the other team.
+    ///
+    /// # Examples
+    /// ```
+    /// use shuftlib::trick_taking::Team;
+    ///
+    /// assert_eq!(Team::NorthSouth.opponent(), Team::EastWest);
+    /// ```
+    pub const fn opponent(self) -> Self {
+        match self {
+            Self::NorthSouth => Self::EastWest,
+            Self::EastWest => Self::NorthSouth,
+        }
+    }
+}
+
+impl Display for Team {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Self::NorthSouth => "North-South",
+            Self::EastWest => "East-West",
+        };
+        f.write_str(name)
     }
 }
 
 #[cfg(test)]
-mod test_utils {
-    use proptest::prelude::Strategy;
+pub(crate) mod test_utils {
+    use proptest::{prelude::Strategy, sample};
 
-    use crate::trick_taking::{PLAYERS, PlayerId};
+    use crate::trick_taking::Seat;
 
-    pub(crate) fn player_id_strategy() -> impl Strategy<Value = PlayerId> {
-        (0..PLAYERS).prop_map(|id| PlayerId::try_from(id).unwrap())
+    pub(crate) fn seat_strategy() -> impl Strategy<Value = Seat> {
+        sample::select(Seat::ALL.to_vec())
     }
 }
 
@@ -267,13 +290,29 @@ mod test_utils {
 mod tests {
     use proptest::prelude::*;
 
-    use crate::trick_taking::{PLAYERS, player::test_utils::player_id_strategy};
+    use super::{Seat, test_utils::seat_strategy};
+
+    #[test]
+    fn index_is_the_position_in_play_order() {
+        for (index, seat) in Seat::ALL.into_iter().enumerate() {
+            assert_eq!(seat.index(), index);
+            assert_eq!(seat.next(), Seat::ALL[(index + 1) % Seat::ALL.len()]);
+        }
+    }
+
+    #[test]
+    fn partners_sit_two_turns_apart() {
+        for seat in Seat::ALL {
+            assert_eq!(seat.after(2).team(), seat.team());
+            assert_ne!(seat.next().team(), seat.team());
+        }
+    }
+
     proptest! {
         #[test]
-        fn sum_always_gives_valid_playerid(p_id in player_id_strategy(), rhs: usize) {
-            let sum = p_id + rhs;
-
-            assert!(sum.0<PLAYERS);
+        fn after_takes_that_many_turns(seat in seat_strategy(), steps in 0usize..100) {
+            let walked = (0..steps).fold(seat, |seat, _| seat.next());
+            prop_assert_eq!(seat.after(steps), walked);
         }
     }
 }

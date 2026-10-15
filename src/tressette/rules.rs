@@ -5,7 +5,7 @@
 
 use crate::{
     cards::{deck::Deck, italian::Suit},
-    trick_taking::{Hand, OngoingTrick, PLAYERS, Player, PlayerId, TrickTakingGame},
+    trick_taking::{Hand, OngoingTrick, PLAYERS, Player, Seat, Team, TrickTakingGame},
 };
 
 use super::card::TressetteCard;
@@ -56,7 +56,7 @@ impl TrickTakingGame for TressetteRules {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{TrickTakingGame, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{TrickTakingGame, Seat}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let cards = [
     ///   TressetteCard::new(ItalianRank::Ace, Suit::Cups),
@@ -65,21 +65,21 @@ impl TrickTakingGame for TressetteRules {
     ///   TressetteCard::new(ItalianRank::Four, Suit::Cups),
     /// ];
     ///
-    /// let taker = TressetteRules::determine_taker(&cards, PlayerId::PLAYER_2);
-    /// assert_eq!(taker, PlayerId::PLAYER_2);
+    /// let taker = TressetteRules::determine_taker(&cards, Seat::South);
+    /// assert_eq!(taker, Seat::South);
     /// ```
-    fn determine_taker(cards: &[TressetteCard; PLAYERS], first_to_play: PlayerId) -> PlayerId {
-        let leading_suit = cards[first_to_play.as_usize()].suit();
+    fn determine_taker(cards: &[TressetteCard; PLAYERS], first_to_play: Seat) -> Seat {
+        let leading_suit = cards[first_to_play.index()].suit();
         // Seed `taker` with `first_to_play`: its own card always matches
         // `leading_suit` by definition, so the loop below never needs to
         // fall back to an empty/missing case.
-        let mut taker = first_to_play.as_usize();
+        let mut taker = first_to_play.index();
         for (i, &c) in cards.iter().enumerate() {
             if c.suit() == leading_suit && c > cards[taker] {
                 taker = i;
             }
         }
-        PlayerId::ALL[taker]
+        Seat::ALL[taker]
     }
 
     fn is_game_over(scores: (u8, u8)) -> bool {
@@ -92,7 +92,7 @@ impl TrickTakingGame for TressetteRules {
 
         for trick in hand.tricks() {
             let taker = trick.taker();
-            let team = if taker == PlayerId::PLAYER_0 || taker == PlayerId::PLAYER_2 {
+            let team = if taker.team() == Team::NorthSouth {
                 &mut thirds.0
             } else {
                 &mut thirds.1
@@ -106,7 +106,7 @@ impl TrickTakingGame for TressetteRules {
         // The game awards 1 extra point to the taker of the last trick.
         let last_taker = hand.tricks().last().map(|t| t.taker());
         if let Some(taker) = last_taker {
-            if taker == PlayerId::PLAYER_0 || taker == PlayerId::PLAYER_2 {
+            if taker.team() == Team::NorthSouth {
                 score.0 += 1;
             } else {
                 score.1 += 1;
@@ -139,9 +139,9 @@ impl TressetteRules {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{tressette::{TressetteRules, TressetteCard}, trick_taking::{PlayerId, Player}, cards::italian::{ItalianRank, Suit}};
+    /// use shuftlib::{tressette::{TressetteRules, TressetteCard}, trick_taking::{Seat, Player}, cards::italian::{ItalianRank, Suit}};
     ///
-    /// let mut player = Player::new(PlayerId::PLAYER_0);
+    /// let mut player = Player::new(Seat::North);
     /// player.give(TressetteCard::new(ItalianRank::Ace, Suit::Swords));
     /// player.give(TressetteCard::new(ItalianRank::Two, Suit::Cups));
     ///
@@ -196,11 +196,11 @@ impl TressetteRules {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{tressette::{TressetteRules, TressetteCard}, trick_taking::{Player, PlayerId, OngoingTrick}, cards::italian::{ItalianRank, Suit}};
+    /// use shuftlib::{tressette::{TressetteRules, TressetteCard}, trick_taking::{Player, Seat, OngoingTrick}, cards::italian::{ItalianRank, Suit}};
     ///
-    /// let mut player = Player::new(PlayerId::PLAYER_0);
+    /// let mut player = Player::new(Seat::North);
     /// player.give(TressetteCard::new(ItalianRank::Ace, Suit::Swords));
-    /// let mut trick = OngoingTrick::<TressetteRules>::new(PlayerId::PLAYER_0);
+    /// let mut trick = OngoingTrick::<TressetteRules>::new(Seat::North);
     ///
     /// // Playing a valid index succeeds
     /// let result = TressetteRules::play(&mut player, 0, &mut trick, None);
@@ -244,7 +244,7 @@ impl TressetteRules {
 mod test_utils {
     use crate::{
         cards::italian::{ItalianRank, Suit},
-        trick_taking::{Player, PlayerId},
+        trick_taking::{Player, player::test_utils::seat_strategy},
     };
     use proptest::collection::hash_set;
     use proptest::prelude::*;
@@ -265,18 +265,16 @@ mod test_utils {
     /// Strategy to create a `Player<TressetteRules>` with random cards.
     pub fn player_strategy() -> impl Strategy<Value = Player<TressetteRules>> {
         (
-            0..crate::trick_taking::PLAYERS,
+            seat_strategy(),
             hash_set(tressette_card_strategy(), 1..crate::trick_taking::TRICKS),
         )
-            .prop_map(|(index, cards)| {
-                let player_id = PlayerId::try_from(index).ok()?;
-                let mut player = Player::new(player_id);
+            .prop_map(|(seat, cards)| {
+                let mut player = Player::new(seat);
                 for card in cards {
                     player.give(card);
                 }
-                Some(player)
+                player
             })
-            .prop_filter_map("valid player id", |opt| opt)
     }
 }
 
@@ -284,7 +282,7 @@ mod test_utils {
 mod tests {
     use proptest::prelude::*;
 
-    use crate::trick_taking::{PlayerId, TrickTakingGame};
+    use crate::trick_taking::{Seat, TrickTakingGame};
 
     use super::{SCORE_TO_WIN, TressetteRules};
 
@@ -378,7 +376,7 @@ mod tests {
         fn play_validates_playability(player in super::test_utils::player_strategy(), index in 0usize..10, suit in crate::cards::italian::test_utils::suit_strategy()) {
             let mut player = player;
             let original_hand_len = player.hand().len();
-            let mut trick = crate::trick_taking::OngoingTrick::<TressetteRules>::new(PlayerId::PLAYER_0);
+            let mut trick = crate::trick_taking::OngoingTrick::<TressetteRules>::new(Seat::North);
 
             // Get playable indices
             let playable = TressetteRules::playable(&player, Some(suit));
@@ -401,7 +399,7 @@ mod tests {
         fn play_with_no_suit_constraint_allows_any_card(player in super::test_utils::player_strategy(), index in 0usize..10) {
             let mut player = player;
             let original_hand_len = player.hand().len();
-            let mut trick = crate::trick_taking::OngoingTrick::<TressetteRules>::new(PlayerId::PLAYER_0);
+            let mut trick = crate::trick_taking::OngoingTrick::<TressetteRules>::new(Seat::North);
 
             let result = TressetteRules::play(&mut player, index, &mut trick, None);
 

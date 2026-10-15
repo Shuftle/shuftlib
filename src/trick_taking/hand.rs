@@ -3,7 +3,7 @@
 //! [`OngoingHand`] accumulates tricks as they're completed; [`OngoingHand::finish`]
 //! produces an immutable [`Hand`] once all tricks are done.
 
-use crate::trick_taking::{OngoingTrick, PlayerId, TRICKS, Trick, TrickTakingGame};
+use crate::trick_taking::{OngoingTrick, Seat, TRICKS, Trick, TrickTakingGame};
 
 /// Various games are usually played multiple times, until one team reaches a
 /// certain score. These "multiple times" are called hands: "We played a game of
@@ -28,7 +28,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{Hand, Trick, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{Hand, Trick, Seat}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let cards = [
     ///     TressetteCard::new(ItalianRank::Ace, Suit::Cups),
@@ -36,7 +36,7 @@ where
     ///     TressetteCard::new(ItalianRank::Three, Suit::Cups),
     ///     TressetteCard::new(ItalianRank::Four, Suit::Cups),
     /// ];
-    /// let trick = Trick::<TressetteRules>::new(cards, PlayerId::PLAYER_0);
+    /// let trick = Trick::<TressetteRules>::new(cards, Seat::North);
     /// let tricks = std::array::from_fn(|_| trick.clone());
     /// let hand = Hand::new(tricks);
     /// ```
@@ -49,7 +49,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{Hand, Trick, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{Hand, Trick, Seat}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let cards = [
     ///     TressetteCard::new(ItalianRank::Ace, Suit::Cups),
@@ -57,7 +57,7 @@ where
     ///     TressetteCard::new(ItalianRank::Three, Suit::Cups),
     ///     TressetteCard::new(ItalianRank::Four, Suit::Cups),
     /// ];
-    /// let trick = Trick::<TressetteRules>::new(cards, PlayerId::PLAYER_0);
+    /// let trick = Trick::<TressetteRules>::new(cards, Seat::North);
     /// let tricks = std::array::from_fn(|_| trick.clone());
     /// let hand = Hand::new(tricks);
     /// assert_eq!(hand.tricks().len(), 10);
@@ -87,10 +87,10 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{OngoingHand, PlayerId}, tressette::TressetteRules};
+    /// use shuftlib::{trick_taking::{OngoingHand, Seat}, tressette::TressetteRules};
     ///
-    /// let hand = OngoingHand::<TressetteRules>::new(PlayerId::PLAYER_0);
-    /// assert_eq!(hand.current_trick().first_to_play(), PlayerId::PLAYER_0);
+    /// let hand = OngoingHand::<TressetteRules>::new(Seat::North);
+    /// assert_eq!(hand.current_trick().first_to_play(), Seat::North);
     /// ```
     pub fn current_trick(&self) -> &OngoingTrick<G> {
         &self.current_trick
@@ -101,9 +101,9 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{OngoingHand, PlayerId}, tressette::TressetteRules};
+    /// use shuftlib::{trick_taking::{OngoingHand, Seat}, tressette::TressetteRules};
     ///
-    /// let hand = OngoingHand::<TressetteRules>::new(PlayerId::PLAYER_0);
+    /// let hand = OngoingHand::<TressetteRules>::new(Seat::North);
     /// assert!(hand.tricks().iter().all(|t| t.is_none()));
     /// ```
     pub fn tricks(&self) -> &[Option<Trick<G>>; TRICKS] {
@@ -118,9 +118,9 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{OngoingHand, Hand, Trick, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{OngoingHand, Hand, Trick, Seat}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
-    /// let ongoing_hand = OngoingHand::<TressetteRules>::new(PlayerId::PLAYER_0);
+    /// let ongoing_hand = OngoingHand::<TressetteRules>::new(Seat::North);
     /// assert!(ongoing_hand.finish().is_none());
     /// ```
     pub fn finish(self) -> Option<Hand<G>> {
@@ -139,14 +139,14 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{OngoingHand, PlayerId}, tressette::TressetteRules};
+    /// use shuftlib::{trick_taking::{OngoingHand, Seat}, tressette::TressetteRules};
     ///
-    /// let ongoing_hand = OngoingHand::<TressetteRules>::new(PlayerId::PLAYER_0);
+    /// let ongoing_hand = OngoingHand::<TressetteRules>::new(Seat::North);
     ///
-    /// assert_eq!(ongoing_hand.current_trick().first_to_play(), PlayerId::PLAYER_0);
+    /// assert_eq!(ongoing_hand.current_trick().first_to_play(), Seat::North);
     /// ongoing_hand.tricks().iter().for_each(|t| assert!(t.is_none()));
     /// ```
-    pub fn new(first_to_play: PlayerId) -> Self {
+    pub fn new(first_to_play: Seat) -> Self {
         Self {
             tricks: [const { None }; TRICKS],
             current_trick: OngoingTrick::new(first_to_play),
@@ -158,16 +158,16 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{OngoingHand, Trick, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{OngoingHand, Trick, Seat}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
-    /// let mut hand = OngoingHand::<TressetteRules>::new(PlayerId::PLAYER_0);
+    /// let mut hand = OngoingHand::<TressetteRules>::new(Seat::North);
     /// let cards = [
     ///     TressetteCard::new(ItalianRank::Ace, Suit::Cups),
     ///     TressetteCard::new(ItalianRank::Two, Suit::Cups),
     ///     TressetteCard::new(ItalianRank::Three, Suit::Cups),
     ///     TressetteCard::new(ItalianRank::Four, Suit::Cups),
     /// ];
-    /// let trick = Trick::<TressetteRules>::new(cards, PlayerId::PLAYER_0);
+    /// let trick = Trick::<TressetteRules>::new(cards, Seat::North);
     /// hand.add(trick, 0);
     /// ```
     pub fn add(&mut self, trick: Trick<G>, id: usize) {

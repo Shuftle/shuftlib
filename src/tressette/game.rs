@@ -4,7 +4,7 @@ use rand::rngs::StdRng;
 
 use crate::{
     cards::{deck::Deck, italian::Suit},
-    trick_taking::{Hand, OngoingHand, OngoingTrick, PLAYERS, Player, PlayerId, TrickTakingGame},
+    trick_taking::{Hand, OngoingHand, OngoingTrick, PLAYERS, Player, Seat, Team, TrickTakingGame},
 };
 
 use super::{TressetteCard, TressetteRules};
@@ -17,20 +17,20 @@ pub enum MoveEffect {
     /// A trick was completed, and the winner is now the next to play.
     TrickCompleted {
         /// The player who won the trick.
-        winner: PlayerId,
+        winner: Seat,
     },
     /// A hand was completed, scores were updated, and a new hand was dealt.
     HandComplete {
         /// The player who won the last trick of the hand.
-        trick_winner: PlayerId,
-        /// The updated scores after the hand: (team_0_2_score, team_1_3_score).
+        trick_winner: Seat,
+        /// The updated scores after the hand: (North-South, East-West).
         score: (u8, u8),
     },
     /// The game is over.
     GameOver {
         /// The player who won the last trick.
-        trick_winner: PlayerId,
-        /// The final scores: (team_0_2_score, team_1_3_score).
+        trick_winner: Seat,
+        /// The final scores: (North-South, East-West).
         final_score: (u8, u8),
     },
 }
@@ -42,8 +42,8 @@ pub enum Status {
     Ongoing,
     /// The game is finished.
     Finished {
-        /// The winning team (team_0_2 or team_1_3).
-        winner: u8,
+        /// The winning team.
+        winner: Team,
     },
 }
 
@@ -51,12 +51,12 @@ pub enum Status {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
     /// The card is not in the current player's hand.
-    #[error("Card {card} is not in player {player}'s hand")]
+    #[error("{card} is not in {player}'s hand")]
     CardNotInHand {
         /// The card that was attempted.
         card: TressetteCard,
         /// The player who tried to play it.
-        player: PlayerId,
+        player: Seat,
     },
     /// The player must follow suit but did not.
     #[error("Must follow suit: played {suit} but {required_suit} is required")]
@@ -85,7 +85,7 @@ pub struct Game {
     players: [Player<TressetteRules>; PLAYERS],
     current_hand: OngoingHand<TressetteRules>,
     /// The player who is dealing the current hand.
-    dealing_player: PlayerId,
+    dealing_player: Seat,
     score: (u8, u8),
     completed_hands: Vec<Hand<TressetteRules>>,
     history: Vec<(TressetteCard, MoveEffect)>,
@@ -117,15 +117,15 @@ impl Game {
         use rand::SeedableRng;
 
         let mut rng = StdRng::seed_from_u64(seed);
-        let dealing_player = PlayerId::ALL[rng.random_range(0..PLAYERS)];
+        let dealing_player = Seat::ALL[rng.random_range(0..PLAYERS)];
         let mut deck = TressetteRules::deck();
         deck.shuffle(&mut rng);
         let mut game = Self {
             players: [
-                Player::new(PlayerId::PLAYER_0),
-                Player::new(PlayerId::PLAYER_1),
-                Player::new(PlayerId::PLAYER_2),
-                Player::new(PlayerId::PLAYER_3),
+                Player::new(Seat::North),
+                Player::new(Seat::West),
+                Player::new(Seat::South),
+                Player::new(Seat::East),
             ],
             // Placeholder, immediately overwritten by `initialize_new_hand` below.
             current_hand: OngoingHand::new(dealing_player),
@@ -152,11 +152,11 @@ impl Game {
     /// let game = Game::new();
     /// let player = game.current_player();
     /// ```
-    pub fn current_player(&self) -> PlayerId {
+    pub fn current_player(&self) -> Seat {
         self.current_hand.current_trick().next_to_play()
     }
 
-    /// Returns the current scores: (team_0_2_score, team_1_3_score).
+    /// Returns the current scores: (North-South, East-West).
     ///
     /// # Examples
     ///
@@ -187,9 +187,9 @@ impl Game {
     pub fn status(&self) -> Status {
         if TressetteRules::is_game_over(self.score) {
             let winner = if self.score.0 > self.score.1 {
-                0
+                Team::NorthSouth
             } else if self.score.1 > self.score.0 {
-                1
+                Team::EastWest
             } else {
                 unreachable!(
                     "The score of the teams is the same, but the game is completed. This is a bug"
@@ -206,19 +206,19 @@ impl Game {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{tressette::Game, trick_taking::PlayerId};
+    /// use shuftlib::{tressette::Game, trick_taking::Seat};
     ///
     /// let game = Game::new();
-    /// let hand = game.hand(PlayerId::PLAYER_0);
+    /// let hand = game.hand(Seat::North);
     /// assert_eq!(hand.len(), 10);
     /// ```
-    pub fn hand(&self, player: PlayerId) -> &[TressetteCard] {
-        self.players[player.as_usize()].hand()
+    pub fn hand(&self, player: Seat) -> &[TressetteCard] {
+        self.players[player.index()].hand()
     }
 
     /// Returns the cards currently played in the ongoing trick.
     ///
-    /// The array is indexed by player ID, with `None` for players who haven't played yet.
+    /// The array is indexed by [`Seat::index`], with `None` for players who haven't played yet.
     ///
     /// # Examples
     ///
@@ -238,12 +238,12 @@ impl Game {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{tressette::Game, trick_taking::{PlayerId, PLAYERS}};
+    /// use shuftlib::{tressette::Game, trick_taking::{Seat, PLAYERS}};
     ///
     /// let game = Game::new();
-    /// assert!(game.trick_leader().as_usize() < PLAYERS);
+    /// assert!(game.trick_leader().index() < PLAYERS);
     /// ```
-    pub fn trick_leader(&self) -> PlayerId {
+    pub fn trick_leader(&self) -> Seat {
         self.current_hand.current_trick().first_to_play()
     }
 
@@ -297,7 +297,7 @@ impl Game {
             return vec![];
         }
 
-        let hand = self.players[self.current_player().as_usize()].hand();
+        let hand = self.players[self.current_player().index()].hand();
 
         let leading_suit = self
             .current_hand
@@ -368,7 +368,7 @@ impl Game {
 
         // Validate card
         if !self.is_legal_card(card) {
-            let hand = self.players[self.current_player().as_usize()].hand();
+            let hand = self.players[self.current_player().index()].hand();
             if !hand.contains(&card) {
                 return Err(Error::CardNotInHand {
                     card,
@@ -387,7 +387,7 @@ impl Game {
         }
 
         // Apply move
-        let player = &mut self.players[self.current_player().as_usize()];
+        let player = &mut self.players[self.current_player().index()];
         let card_idx = player
             .hand()
             .iter()
@@ -503,7 +503,7 @@ impl Game {
         }
     }
 
-    fn complete_hand(&mut self, last_trick_winner: PlayerId) -> Result<MoveEffect, Error> {
+    fn complete_hand(&mut self, last_trick_winner: Seat) -> Result<MoveEffect, Error> {
         // Finish the current hand.
         let hand = self
             .current_hand
@@ -550,22 +550,22 @@ impl Game {
 
     /// Deals cards to all players.
     fn deal(&mut self) {
-        let mut to_deal_to = self.dealing_player + 1;
+        let mut to_deal_to = self.dealing_player.next();
 
         while !self.deck.is_empty() {
             if let Some(cards) = self.deck.draw_n(5) {
                 for card in cards {
-                    self.players[to_deal_to.as_usize()].give(card);
+                    self.players[to_deal_to.index()].give(card);
                 }
-                to_deal_to.inc();
+                to_deal_to = to_deal_to.next();
             }
         }
     }
 
     /// Resets the hand state and prepares for a new hand.
     fn initialize_new_hand(&mut self) {
-        self.dealing_player.inc();
-        self.current_hand = OngoingHand::new(self.dealing_player + 1);
+        self.dealing_player = self.dealing_player.next();
+        self.current_hand = OngoingHand::new(self.dealing_player.next());
     }
 }
 
@@ -591,7 +591,7 @@ mod tests {
         // Each player should have 10 cards
         for i in 0..PLAYERS {
             assert_eq!(
-                game.hand(PlayerId::try_from(i).unwrap()).len(),
+                game.hand(Seat::ALL[i]).len(),
                 10,
                 "Player {} should have 10 cards",
                 i
@@ -621,7 +621,7 @@ mod tests {
 
         game.players[1].give(cups_ace);
         game.players[1].give(swords_two);
-        let mut ongoing_trick = OngoingTrick::new(PlayerId::PLAYER_0);
+        let mut ongoing_trick = OngoingTrick::new(Seat::North);
         ongoing_trick.play(cups_ace);
         game.current_hand.set_current_trick(ongoing_trick);
 
@@ -666,19 +666,19 @@ mod tests {
 
         let mut predicted: [Vec<TressetteCard>; PLAYERS] =
             [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-        let mut to_deal_to = game.dealing_player + 1;
+        let mut to_deal_to = game.dealing_player.next();
         while !unshuffled.is_empty() {
             for _ in 0..5 {
-                predicted[to_deal_to.as_usize()].push(unshuffled.pop().unwrap());
+                predicted[to_deal_to.index()].push(unshuffled.pop().unwrap());
             }
-            to_deal_to.inc();
+            to_deal_to = to_deal_to.next();
         }
 
         // With a real shuffle, matching this zero-entropy prediction for even
         // one player is astronomically unlikely, let alone all four.
-        for player in PlayerId::ALL {
+        for player in Seat::ALL {
             let actual = game.hand(player).to_vec();
-            assert_ne!(actual, predicted[player.as_usize()], "player {player}");
+            assert_ne!(actual, predicted[player.index()], "player {player}");
         }
     }
 
@@ -708,7 +708,7 @@ mod tests {
 
                     let mut total_hand_size = 0;
                     for (player, prev_size) in prev_hand_sizes.iter_mut().enumerate().take(PLAYERS) {
-                        let hand_len = game.hand(PlayerId::try_from(player).unwrap()).len();
+                        let hand_len = game.hand(Seat::ALL[player]).len();
                         // Hand size should decrease every time.
                         prop_assert!(hand_len <= *prev_size);
                         *prev_size = hand_len;
