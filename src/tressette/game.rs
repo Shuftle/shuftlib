@@ -3,7 +3,7 @@
 use rand::rngs::StdRng;
 
 use crate::{
-    core::{Suit, deck::Deck},
+    cards::{deck::Deck, italian::Suit},
     trick_taking::{Hand, OngoingHand, OngoingTrick, PLAYERS, Player, PlayerId, TrickTakingGame},
 };
 
@@ -329,7 +329,7 @@ impl Game {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{tressette::{Game, TressetteCard}, core::{Suit, italian::ItalianRank}};
+    /// use shuftlib::{tressette::{Game, TressetteCard}, cards::italian::{ItalianRank, Suit}};
     ///
     /// let game = Game::new();
     /// let card = game.hand(game.current_player())[0];
@@ -578,8 +578,8 @@ impl Default for Game {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::Suit;
-    use crate::core::italian::ItalianRank;
+    use crate::cards::italian::ItalianRank;
+    use crate::cards::italian::Suit;
     use proptest::prelude::*;
 
     #[test]
@@ -616,17 +616,17 @@ mod tests {
         let mut game = Game::new();
 
         // Set up a specific scenario
-        let hearts_ace = TressetteCard::new(ItalianRank::Ace, Suit::Hearts);
-        let spades_two = TressetteCard::new(ItalianRank::Two, Suit::Spades);
+        let cups_ace = TressetteCard::new(ItalianRank::Ace, Suit::Cups);
+        let swords_two = TressetteCard::new(ItalianRank::Two, Suit::Swords);
 
-        game.players[1].give(hearts_ace);
-        game.players[1].give(spades_two);
+        game.players[1].give(cups_ace);
+        game.players[1].give(swords_two);
         let mut ongoing_trick = OngoingTrick::new(PlayerId::PLAYER_0);
-        ongoing_trick.play(hearts_ace);
+        ongoing_trick.play(cups_ace);
         game.current_hand.set_current_trick(ongoing_trick);
 
-        // Player has hearts, must play hearts
-        let result = game.play_card(spades_two);
+        // Player has cups, must play cups
+        let result = game.play_card(swords_two);
         assert!(matches!(result, Err(Error::MustFollowSuit { .. })));
     }
 

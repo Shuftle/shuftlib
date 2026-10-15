@@ -28,13 +28,13 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{Hand, Trick, PlayerId}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{Hand, Trick, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let cards = [
-    ///     TressetteCard::new(ItalianRank::Ace, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Two, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Three, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Four, Suit::Hearts),
+    ///     TressetteCard::new(ItalianRank::Ace, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Two, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Three, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Four, Suit::Cups),
     /// ];
     /// let trick = Trick::<TressetteRules>::new(cards, PlayerId::PLAYER_0);
     /// let tricks = std::array::from_fn(|_| trick.clone());
@@ -49,13 +49,13 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{Hand, Trick, PlayerId}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{Hand, Trick, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let cards = [
-    ///     TressetteCard::new(ItalianRank::Ace, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Two, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Three, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Four, Suit::Hearts),
+    ///     TressetteCard::new(ItalianRank::Ace, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Two, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Three, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Four, Suit::Cups),
     /// ];
     /// let trick = Trick::<TressetteRules>::new(cards, PlayerId::PLAYER_0);
     /// let tricks = std::array::from_fn(|_| trick.clone());
@@ -118,7 +118,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{OngoingHand, Hand, Trick, PlayerId}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{OngoingHand, Hand, Trick, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let ongoing_hand = OngoingHand::<TressetteRules>::new(PlayerId::PLAYER_0);
     /// assert!(ongoing_hand.finish().is_none());
@@ -158,14 +158,14 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{OngoingHand, Trick, PlayerId}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{OngoingHand, Trick, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let mut hand = OngoingHand::<TressetteRules>::new(PlayerId::PLAYER_0);
     /// let cards = [
-    ///     TressetteCard::new(ItalianRank::Ace, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Two, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Three, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Four, Suit::Hearts),
+    ///     TressetteCard::new(ItalianRank::Ace, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Two, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Three, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Four, Suit::Cups),
     /// ];
     /// let trick = Trick::<TressetteRules>::new(cards, PlayerId::PLAYER_0);
     /// hand.add(trick, 0);

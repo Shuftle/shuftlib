@@ -6,7 +6,7 @@
 //! - Hand completion and scoring mechanics
 //! - Core trait for implementing different trick-taking games
 
-use crate::core::{Card, deck::Deck};
+use crate::cards::{Card, deck::Deck};
 
 /// Number of tricks in a hand.
 pub const TRICKS: usize = 10;

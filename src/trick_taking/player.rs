@@ -33,14 +33,14 @@ where
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::{trick_taking::{Player, TrickTakingGame, PlayerId}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{Player, TrickTakingGame, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let player_id = PlayerId::PLAYER_0;
     /// let mut player = Player::<TressetteRules>::new(player_id);
     /// // Players have no cards when created.
     /// assert_eq!(player.hand().len(), 0);
     ///
-    /// let card = TressetteCard::new(ItalianRank::Ace, Suit::Spades);
+    /// let card = TressetteCard::new(ItalianRank::Ace, Suit::Swords);
     /// player.give(card);
     /// assert_eq!(player.hand().len(), 1);
     /// ```
@@ -55,13 +55,13 @@ where
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::{trick_taking::{Player, TrickTakingGame, PlayerId}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{Player, TrickTakingGame, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let player_id = PlayerId::PLAYER_0;
     /// let mut player = Player::<TressetteRules>::new(player_id);
     ///
-    /// let card1 = TressetteCard::new(ItalianRank::Ace, Suit::Spades);
-    /// let card2 = TressetteCard::new(ItalianRank::King, Suit::Hearts);
+    /// let card1 = TressetteCard::new(ItalianRank::Ace, Suit::Swords);
+    /// let card2 = TressetteCard::new(ItalianRank::King, Suit::Cups);
     /// player.give(card1);
     /// player.give(card2);
     ///

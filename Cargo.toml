@@ -17,9 +17,7 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0.104"
-num-rational = "0.4.2"
 rand="0.10"
-strum = {version="0.28", default-features=false, features=["derive"]}
 thiserror = "2.0"
 
 [features]

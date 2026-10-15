@@ -45,13 +45,13 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{Trick, PlayerId}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{Trick, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let cards = [
-    ///     TressetteCard::new(ItalianRank::Ace, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Two, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Three, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Four, Suit::Hearts),
+    ///     TressetteCard::new(ItalianRank::Ace, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Two, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Three, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Four, Suit::Cups),
     /// ];
     /// let trick = Trick::<TressetteRules>::new(cards, PlayerId::PLAYER_0);
     /// assert_eq!(trick.taken_with(), cards[0]);
@@ -65,13 +65,13 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{Trick, PlayerId}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{Trick, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let cards = [
-    ///     TressetteCard::new(ItalianRank::Ace, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Two, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Three, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Four, Suit::Hearts),
+    ///     TressetteCard::new(ItalianRank::Ace, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Two, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Three, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Four, Suit::Cups),
     /// ];
     /// let trick = Trick::<TressetteRules>::new(cards, PlayerId::PLAYER_0);
     /// assert_eq!(trick.taker(), PlayerId::PLAYER_0);
@@ -85,13 +85,13 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{Trick, PlayerId}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{Trick, PlayerId}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let cards = [
-    ///     TressetteCard::new(ItalianRank::Ace, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Two, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Three, Suit::Hearts),
-    ///     TressetteCard::new(ItalianRank::Four, Suit::Hearts),
+    ///     TressetteCard::new(ItalianRank::Ace, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Two, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Three, Suit::Cups),
+    ///     TressetteCard::new(ItalianRank::Four, Suit::Cups),
     /// ];
     /// let trick = Trick::<TressetteRules>::new(cards, PlayerId::PLAYER_0);
     /// assert_eq!(trick.cards(), &cards);
@@ -135,10 +135,10 @@ where
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::{trick_taking::{OngoingTrick, PlayerId, TrickTakingGame}, core::{Card, Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{OngoingTrick, PlayerId, TrickTakingGame}, cards::{Card, italian::{ItalianRank, Suit}}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let first_to_play = PlayerId::PLAYER_0;
-    /// let card = TressetteCard::new(ItalianRank::Ace, Suit::Hearts);
+    /// let card = TressetteCard::new(ItalianRank::Ace, Suit::Cups);
     /// let mut trick = OngoingTrick::<TressetteRules>::new(first_to_play);
     /// trick.play(card);
     /// let mut second_to_play = first_to_play;
@@ -167,13 +167,13 @@ where
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{trick_taking::{OngoingTrick, PlayerId, TrickTakingGame}, core::{Suit, italian::ItalianRank}, tressette::{TressetteRules, TressetteCard}};
+    /// use shuftlib::{trick_taking::{OngoingTrick, PlayerId, TrickTakingGame}, cards::italian::{ItalianRank, Suit}, tressette::{TressetteRules, TressetteCard}};
     ///
     /// let cards = [
-    ///   TressetteCard::new(ItalianRank::Ace, Suit::Hearts),
-    ///   TressetteCard::new(ItalianRank::Two, Suit::Hearts),
-    ///   TressetteCard::new(ItalianRank::Three, Suit::Hearts),
-    ///   TressetteCard::new(ItalianRank::Four, Suit::Hearts),
+    ///   TressetteCard::new(ItalianRank::Ace, Suit::Cups),
+    ///   TressetteCard::new(ItalianRank::Two, Suit::Cups),
+    ///   TressetteCard::new(ItalianRank::Three, Suit::Cups),
+    ///   TressetteCard::new(ItalianRank::Four, Suit::Cups),
     /// ];
     /// let first_to_play = PlayerId::PLAYER_0;
     /// let mut ongoing_trick = OngoingTrick::<TressetteRules>::new(first_to_play);
@@ -278,10 +278,10 @@ pub mod test_utils {
     use proptest::collection::hash_set;
     use proptest::prelude::*;
 
-    use crate::core::deck::Deck;
-    pub use crate::core::italian::test_utils::italian_card_strategy;
+    use crate::cards::deck::Deck;
+    pub use crate::cards::italian::test_utils::italian_card_strategy;
     use crate::trick_taking::{Hand, OngoingTrick, PlayerId, TrickTakingGame};
-    use crate::{core::italian::ItalianCard, trick_taking::PLAYERS};
+    use crate::{cards::italian::ItalianCard, trick_taking::PLAYERS};
 
     /// A minimal test implementation of TrickTakingGame for testing purposes.
     ///
