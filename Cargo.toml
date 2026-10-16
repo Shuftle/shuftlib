@@ -5,9 +5,9 @@ edition = "2024"
 rust-version = "1.85"
 authors = ["Sebastiano Giordano"]
 categories = ["game-development"]
-description = "A generic library for card games and related topics"
+description = "A library for turn-based games: an engine for multiplayer servers, clients and bots, with Tressette"
 documentation = "https://docs.rs/shuftlib"
-keywords = ["cards", "card_games"]
+keywords = ["game-engine", "turn-based", "card-games", "tressette", "multiplayer"]
 license = "AGPL-3.0-only"
 readme = "README.md"
 repository = "https://github.com/shuftle/shuftlib"
@@ -16,10 +16,7 @@ repository = "https://github.com/shuftle/shuftlib"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0.104"
-num-rational = "0.4.2"
 rand="0.10"
-strum = {version="0.28", default-features=false, features=["derive"]}
 thiserror = "2.0"
 
 [features]

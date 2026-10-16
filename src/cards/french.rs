@@ -1,15 +1,11 @@
 //! French playing cards.
 //!
-//! Provides [`FrenchCard`](crate::core::french::FrenchCard) and
-//! [`FrenchRank`](crate::core::french::FrenchRank) for the standard 52-card French deck,
-//! plus an optional [`Joker`](crate::core::french::Joker) via
-//! [`FrenchWithJoker`](crate::core::french::FrenchWithJoker).
+//! Provides [`FrenchCard`], [`FrenchRank`] and [`Suit`] for the standard
+//! 52-card French deck, plus an optional [`Joker`] via [`FrenchWithJoker`].
 
 use std::fmt::Display;
 
-use strum::{EnumIter, FromRepr};
-
-use crate::core::{Card, Suit};
+use crate::cards::Card;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Representation of a card that goes into a French deck.
@@ -23,7 +19,7 @@ impl FrenchCard {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{french::{FrenchCard, FrenchRank}, Suit};
+    /// use shuftlib::cards::french::{FrenchCard, FrenchRank, Suit};
     ///
     /// let card = FrenchCard::new(FrenchRank::Ace, Suit::Hearts);
     /// assert_eq!(card.rank(), FrenchRank::Ace);
@@ -54,8 +50,17 @@ impl Default for FrenchCard {
 }
 
 impl Display for FrenchCard {
+    /// Formats the card as its rank and suit, e.g. "Queen of Hearts".
+    ///
+    /// # Examples
+    /// ```
+    /// use shuftlib::cards::french::{FrenchCard, FrenchRank, Suit};
+    ///
+    /// let card = FrenchCard::new(FrenchRank::Queen, Suit::Hearts);
+    /// assert_eq!(card.to_string(), "Queen of Hearts");
+    /// ```
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}", self.rank as u8, self.suit)
+        write!(f, "{} of {}", self.rank, self.suit)
     }
 }
 
@@ -69,7 +74,7 @@ impl Card for Joker {}
 
 impl Display for Joker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "JK")
+        f.write_str("Joker")
     }
 }
 
@@ -101,7 +106,7 @@ impl Display for FrenchWithJoker {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, EnumIter, FromRepr, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 #[repr(u8)]
 /// The rank of the card. In a French deck, ranks go from the ace to 10, then there is a jack, queen and king.
 /// In most games they each have a different value that depends on the game itself.
@@ -132,4 +137,76 @@ pub enum FrenchRank {
     Queen,
     /// 13
     King,
+}
+
+impl FrenchRank {
+    /// Every rank, from the ace to the king.
+    pub const ALL: [Self; 13] = [
+        Self::Ace,
+        Self::Two,
+        Self::Three,
+        Self::Four,
+        Self::Five,
+        Self::Six,
+        Self::Seven,
+        Self::Eight,
+        Self::Nine,
+        Self::Ten,
+        Self::Jack,
+        Self::Queen,
+        Self::King,
+    ];
+}
+
+impl Display for FrenchRank {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Self::Ace => "Ace",
+            Self::Two => "Two",
+            Self::Three => "Three",
+            Self::Four => "Four",
+            Self::Five => "Five",
+            Self::Six => "Six",
+            Self::Seven => "Seven",
+            Self::Eight => "Eight",
+            Self::Nine => "Nine",
+            Self::Ten => "Ten",
+            Self::Jack => "Jack",
+            Self::Queen => "Queen",
+            Self::King => "King",
+        };
+        f.write_str(name)
+    }
+}
+
+/// The four suits of the French deck.
+///
+/// Suits are ordered as listed: the deck order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Suit {
+    /// Hearts.
+    Hearts,
+    /// Diamonds, also called tiles.
+    Diamonds,
+    /// Clubs, also called clovers.
+    Clubs,
+    /// Spades, also called pikes.
+    Spades,
+}
+
+impl Suit {
+    /// Every suit, in deck order.
+    pub const ALL: [Self; 4] = [Self::Hearts, Self::Diamonds, Self::Clubs, Self::Spades];
+}
+
+impl Display for Suit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Self::Hearts => "Hearts",
+            Self::Diamonds => "Diamonds",
+            Self::Clubs => "Clubs",
+            Self::Spades => "Spades",
+        };
+        f.write_str(name)
+    }
 }

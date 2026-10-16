@@ -1,29 +1,29 @@
 //! Card implementation for the Tressette game.
 //!
-//! This module provides [`TressetteCard`], a wrapper around [`ItalianCard`](crate::core::italian::ItalianCard)
+//! This module provides [`TressetteCard`], a wrapper around [`ItalianCard`](crate::cards::italian::ItalianCard)
 //! that implements Tressette-specific ordering and scoring rules.
 
 use std::{cmp::Ordering, fmt::Display, ops::Deref};
 
-use crate::core::italian::{ItalianCard, ItalianRank};
-use crate::core::{Card, Suit};
-use num_rational::Rational32;
+use crate::cards::italian::{ItalianCard, ItalianRank};
+use crate::cards::{Card, italian::Suit};
 
 /// A card in the Tressette game.
 ///
-/// Wraps an [`ItalianCard`] and implements Tressette-specific ordering where:
-/// 4 < 5 < 6 < 7 < Jack < Knight < King < Ace < 2 < 3
+/// Wraps an [`ItalianCard`] and implements Tressette-specific ordering: cards
+/// are ordered by suit, then by strength, which within a suit is
+/// 4 < 5 < 6 < 7 < Jack < Knight < King < Ace < 2 < 3.
 ///
 /// # Examples
 ///
 /// ```
-/// use shuftlib::{tressette::TressetteCard, core::{Suit, italian::ItalianRank}};
+/// use shuftlib::{tressette::TressetteCard, cards::italian::{ItalianRank, Suit}};
 ///
-/// let ace = TressetteCard::new(ItalianRank::Ace, Suit::Hearts);
-/// let three = TressetteCard::new(ItalianRank::Three, Suit::Hearts);
+/// let ace = TressetteCard::new(ItalianRank::Ace, Suit::Cups);
+/// let three = TressetteCard::new(ItalianRank::Three, Suit::Cups);
 ///
 /// assert!(three > ace);
-/// assert_eq!(ace.suit(), Suit::Hearts);
+/// assert_eq!(ace.suit(), Suit::Cups);
 /// ```
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Default, Hash)]
 pub struct TressetteCard {
@@ -37,27 +37,29 @@ impl PartialOrd for TressetteCard {
 }
 
 impl Ord for TressetteCard {
-    /// Compare cards by Tressette rank ordering.
+    /// Compares cards by suit, then by Tressette strength.
     ///
-    /// In Tressette, the rank order from lowest to highest is:
-    /// 4 < 5 < 6 < 7 < Jack < Knight < King < Ace < 2 < 3
+    /// Within a suit, the order from weakest to strongest is:
+    /// 4 < 5 < 6 < 7 < Jack < Knight < King < Ace < 2 < 3. Only cards of the
+    /// same suit compete for a trick, so the order between suits is just
+    /// the deck order, to keep the ordering consistent with equality.
     ///
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{tressette::TressetteCard, core::{Suit, italian::ItalianRank}};
+    /// use shuftlib::{tressette::TressetteCard, cards::italian::{ItalianRank, Suit}};
     ///
     /// // Test all adjacent pairs (transitivity guarantees full ordering)
-    /// let four = TressetteCard::new(ItalianRank::Four, Suit::Hearts);
-    /// let five = TressetteCard::new(ItalianRank::Five, Suit::Hearts);
-    /// let six = TressetteCard::new(ItalianRank::Six, Suit::Hearts);
-    /// let seven = TressetteCard::new(ItalianRank::Seven, Suit::Hearts);
-    /// let jack = TressetteCard::new(ItalianRank::Jack, Suit::Hearts);
-    /// let knight = TressetteCard::new(ItalianRank::Knight, Suit::Hearts);
-    /// let king = TressetteCard::new(ItalianRank::King, Suit::Hearts);
-    /// let ace = TressetteCard::new(ItalianRank::Ace, Suit::Hearts);
-    /// let two = TressetteCard::new(ItalianRank::Two, Suit::Hearts);
-    /// let three = TressetteCard::new(ItalianRank::Three, Suit::Hearts);
+    /// let four = TressetteCard::new(ItalianRank::Four, Suit::Cups);
+    /// let five = TressetteCard::new(ItalianRank::Five, Suit::Cups);
+    /// let six = TressetteCard::new(ItalianRank::Six, Suit::Cups);
+    /// let seven = TressetteCard::new(ItalianRank::Seven, Suit::Cups);
+    /// let jack = TressetteCard::new(ItalianRank::Jack, Suit::Cups);
+    /// let knight = TressetteCard::new(ItalianRank::Knight, Suit::Cups);
+    /// let king = TressetteCard::new(ItalianRank::King, Suit::Cups);
+    /// let ace = TressetteCard::new(ItalianRank::Ace, Suit::Cups);
+    /// let two = TressetteCard::new(ItalianRank::Two, Suit::Cups);
+    /// let three = TressetteCard::new(ItalianRank::Three, Suit::Cups);
     ///
     /// assert!(four < five);
     /// assert!(five < six);
@@ -85,20 +87,20 @@ impl Ord for TressetteCard {
             }
         }
 
-        rank_order(self.rank()).cmp(&rank_order(other.rank()))
+        (self.suit(), rank_order(self.rank())).cmp(&(other.suit(), rank_order(other.rank())))
     }
 }
 
 impl Display for TressetteCard {
-    /// Formats the card for display using rank number and suit symbol.
+    /// Formats the card as its rank and suit, e.g. "Ace of Cups".
     ///
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{tressette::TressetteCard, core::{Suit, italian::ItalianRank}};
+    /// use shuftlib::{tressette::TressetteCard, cards::italian::{ItalianRank, Suit}};
     ///
-    /// let card = TressetteCard::new(ItalianRank::Ace, Suit::Hearts);
-    /// assert_eq!(format!("{}", card), "1H");
+    /// let card = TressetteCard::new(ItalianRank::Ace, Suit::Cups);
+    /// assert_eq!(format!("{}", card), "Ace of Cups");
     /// ```
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.card)
@@ -113,7 +115,7 @@ impl From<ItalianCard> for TressetteCard {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{tressette::TressetteCard, core::{Suit, italian::{ItalianCard, ItalianRank}}};
+    /// use shuftlib::{tressette::TressetteCard, cards::italian::{ItalianCard, ItalianRank, Suit}};
     ///
     /// let italian_card = ItalianCard::new(ItalianRank::King, Suit::Clubs);
     /// let tressette_card: TressetteCard = italian_card.into();
@@ -133,37 +135,37 @@ impl Deref for TressetteCard {
 }
 
 impl TressetteCard {
-    /// Returns the point value of the card in Tressette.
+    /// Returns the value of the card in Tressette, in thirds of a point:
     ///
-    /// - Ace = 1 point (3/3)
-    /// - Two, Three, and figures (Jack, Knight, King) = 1/3 point
-    /// - All other cards = 0 points
+    /// - Ace = 3 thirds, a whole point;
+    /// - Two, Three, and figures (Jack, Knight, King) = 1 third;
+    /// - All other cards = 0.
+    ///
+    /// Counting in thirds keeps the sums exact: a team scores the whole
+    /// points among the thirds it took.
     ///
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{tressette::TressetteCard, core::{Suit, italian::ItalianRank}};
-    /// use num_rational::Rational32;
+    /// use shuftlib::{tressette::TressetteCard, cards::italian::{ItalianRank, Suit}};
     ///
-    /// let ace = TressetteCard::new(ItalianRank::Ace, Suit::Hearts);
-    /// let two = TressetteCard::new(ItalianRank::Two, Suit::Spades);
+    /// let ace = TressetteCard::new(ItalianRank::Ace, Suit::Cups);
+    /// let two = TressetteCard::new(ItalianRank::Two, Suit::Swords);
     /// let four = TressetteCard::new(ItalianRank::Four, Suit::Clubs);
     ///
-    /// assert_eq!(ace.value(), Rational32::new(3, 3));
-    /// assert_eq!(two.value(), Rational32::new(1, 3));
-    /// assert_eq!(four.value(), Rational32::new(0, 3));
+    /// assert_eq!(ace.thirds(), 3);
+    /// assert_eq!(two.thirds(), 1);
+    /// assert_eq!(four.thirds(), 0);
     /// ```
-    pub fn value(&self) -> Rational32 {
+    pub fn thirds(&self) -> u8 {
         match self.rank() {
-            ItalianRank::Ace => Rational32::new(3, 3),
+            ItalianRank::Ace => 3,
             ItalianRank::Two
             | ItalianRank::Three
             | ItalianRank::Jack
             | ItalianRank::Knight
-            | ItalianRank::King => Rational32::new(1, 3),
-            ItalianRank::Four | ItalianRank::Five | ItalianRank::Six | ItalianRank::Seven => {
-                Rational32::new(0, 3)
-            }
+            | ItalianRank::King => 1,
+            ItalianRank::Four | ItalianRank::Five | ItalianRank::Six | ItalianRank::Seven => 0,
         }
     }
 
@@ -172,10 +174,10 @@ impl TressetteCard {
     /// # Examples
     ///
     /// ```
-    /// use shuftlib::{core::{Suit, italian::{ItalianCard, ItalianRank}}, tressette::TressetteCard};
+    /// use shuftlib::{cards::italian::{ItalianCard, ItalianRank, Suit}, tressette::TressetteCard};
     ///
-    /// let card = TressetteCard::new(ItalianRank::Ace, Suit::Spades);
-    /// assert_eq!(*card, ItalianCard::new(ItalianRank::Ace, Suit::Spades));
+    /// let card = TressetteCard::new(ItalianRank::Ace, Suit::Swords);
+    /// assert_eq!(*card, ItalianCard::new(ItalianRank::Ace, Suit::Swords));
     /// ```
     pub fn new(rank: ItalianRank, suit: Suit) -> Self {
         let card = ItalianCard::new(rank, suit);

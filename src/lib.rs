@@ -10,9 +10,6 @@
 )]
 #![doc = include_str!("../README.md")]
 
-/// Core primitives for card games (cards, decks, game mechanics).
-pub mod core;
-/// Contains the logic for the tressette game.
+pub mod cards;
+pub mod engine;
 pub mod tressette;
-/// Trick-taking game mechanics available at the crate root.
-pub mod trick_taking;

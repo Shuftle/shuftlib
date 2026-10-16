@@ -1,15 +1,15 @@
 //! A generic, stack-like collection of cards: `draw` and `push` act on the same end,
 //! plus shuffle and deal operations.
 //!
-//! [`Deck`](crate::core::deck::Deck) is generic over any [`Card`] implementation; this
+//! [`Deck`](crate::cards::deck::Deck) is generic over any [`Card`] implementation; this
 //! module also provides constructors for the standard Italian and French decks.
 
 use rand::{Rng, RngExt, seq::SliceRandom};
-use strum::IntoEnumIterator;
 
-use crate::core::{
-    Card, Suit,
+use crate::cards::{
+    Card, french,
     french::{FrenchCard, FrenchRank, FrenchWithJoker, Joker},
+    italian,
     italian::{ItalianCard, ItalianRank},
 };
 
@@ -20,16 +20,16 @@ use crate::core::{
 ///
 /// Creating an Italian deck:
 /// ```
-/// use shuftlib::core::{deck::Deck, italian::ItalianRank, Suit};
+/// use shuftlib::cards::{deck::Deck, italian::{ItalianRank, Suit}};
 ///
 /// let deck = Deck::italian();
 /// assert_eq!(deck.len(), 40);
-/// assert!(deck.iter().any(|card| card.rank() == ItalianRank::Ace && card.suit() == Suit::Hearts));
+/// assert!(deck.iter().any(|card| card.rank() == ItalianRank::Ace && card.suit() == Suit::Coins));
 /// ```
 ///
 /// Creating a French deck:
 /// ```
-/// use shuftlib::core::{deck::Deck, french::FrenchRank, Suit};
+/// use shuftlib::cards::{deck::Deck, french::{FrenchRank, Suit}};
 ///
 /// let deck = Deck::french();
 /// assert_eq!(deck.len(), 52);
@@ -38,7 +38,7 @@ use crate::core::{
 ///
 /// Creating a French deck with jokers:
 /// ```
-/// use shuftlib::core::{deck::Deck, french::FrenchWithJoker};
+/// use shuftlib::cards::{deck::Deck, french::FrenchWithJoker};
 ///
 /// let deck = Deck::french_with_jokers(2);
 /// assert_eq!(deck.len(), 54);
@@ -59,15 +59,15 @@ impl Deck<ItalianCard> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
+    /// use shuftlib::cards::{deck::Deck, italian::ItalianCard};
     ///
     /// let deck = Deck::italian();
     /// assert_eq!(deck.len(), 40);
     /// ```
     pub fn italian() -> Deck<ItalianCard> {
         let mut cards = Vec::with_capacity(ITALIAN_CARDS);
-        for suit in Suit::iter() {
-            for rank in ItalianRank::iter() {
+        for suit in italian::Suit::ALL {
+            for rank in ItalianRank::ALL {
                 cards.push(ItalianCard::new(rank, suit));
             }
         }
@@ -81,15 +81,15 @@ impl Deck<FrenchCard> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{deck::Deck, french::FrenchCard};
+    /// use shuftlib::cards::{deck::Deck, french::FrenchCard};
     ///
     /// let deck = Deck::french();
     /// assert_eq!(deck.len(), 52);
     /// ```
     pub fn french() -> Deck<FrenchCard> {
         let mut cards = Vec::with_capacity(FRENCH_CARDS);
-        for suit in Suit::iter() {
-            for rank in FrenchRank::iter() {
+        for suit in french::Suit::ALL {
+            for rank in FrenchRank::ALL {
                 cards.push(FrenchCard::new(rank, suit));
             }
         }
@@ -103,7 +103,7 @@ impl Deck<FrenchWithJoker> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{deck::Deck, french::{FrenchWithJoker, Joker}};
+    /// use shuftlib::cards::{deck::Deck, french::{FrenchWithJoker, Joker}};
     ///
     /// let deck = Deck::french_with_jokers(2);
     /// assert_eq!(deck.len(), 54);
@@ -111,8 +111,8 @@ impl Deck<FrenchWithJoker> {
     /// ```
     pub fn french_with_jokers(jokers: u8) -> Deck<FrenchWithJoker> {
         let mut cards = Vec::with_capacity(FRENCH_CARDS + jokers as usize);
-        for suit in Suit::iter() {
-            for rank in FrenchRank::iter() {
+        for suit in french::Suit::ALL {
+            for rank in FrenchRank::ALL {
                 cards.push(FrenchWithJoker::Normal(FrenchCard::new(rank, suit)));
             }
         }
@@ -133,7 +133,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
+    /// use shuftlib::cards::{deck::Deck, italian::ItalianCard};
     ///
     /// let mut deck = Deck::italian();
     /// deck.shuffle(&mut rand::rng());
@@ -143,27 +143,29 @@ impl<T: Card> Deck<T> {
         self.cards.shuffle(rng);
     }
 
-    /// Adds a card in a random position inside the deck.
+    /// Adds a card in a random position inside the deck: neither on top nor
+    /// at the bottom, every position between them equally likely. A deck of
+    /// fewer than two cards has no inside, so the card goes on top.
     ///
     /// Takes the random number generator to use, so callers that need reproducible
     /// results (e.g. for deterministic replay) can supply a seeded one.
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{deck::Deck, italian::{ItalianCard, ItalianRank}, Suit};
+    /// use shuftlib::cards::{deck::Deck, italian::{ItalianCard, ItalianRank, Suit}};
     ///
     /// let mut deck = Deck::italian();
-    /// let card = ItalianCard::new(ItalianRank::Ace, Suit::Hearts);
+    /// let card = ItalianCard::new(ItalianRank::Ace, Suit::Coins);
     /// deck.shuffle_card(card, &mut rand::rng());
     /// assert_eq!(deck.len(), 41);
     /// ```
     pub fn shuffle_card(&mut self, card: T, rng: &mut impl Rng) {
         let len = self.cards.len();
-        let pos = match len {
-            0 => 0,
-            1 => 1,
-            2 => 1,
-            _ => rng.random_range(1..len - 1),
+        // Inserting at `len` would put the card on top, at 0 at the bottom.
+        let pos = if len < 2 {
+            len
+        } else {
+            rng.random_range(1..len)
         };
         self.cards.insert(pos, card);
     }
@@ -172,10 +174,10 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{deck::Deck, italian::{ItalianCard, ItalianRank}, Suit};
+    /// use shuftlib::cards::{deck::Deck, italian::{ItalianCard, ItalianRank, Suit}};
     ///
     /// let mut deck = Deck::new();
-    /// let card = ItalianCard::new(ItalianRank::Ace, Suit::Hearts);
+    /// let card = ItalianCard::new(ItalianRank::Ace, Suit::Coins);
     /// deck.push(card);
     /// assert_eq!(deck.len(), 1);
     /// ```
@@ -187,7 +189,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
+    /// use shuftlib::cards::{deck::Deck, italian::ItalianCard};
     ///
     /// let mut deck = Deck::italian();
     /// let card = deck.draw();
@@ -204,7 +206,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
+    /// use shuftlib::cards::{deck::Deck, italian::ItalianCard};
     ///
     /// let mut deck = Deck::italian();
     /// let drawn = deck.draw_n(3).unwrap().collect::<Vec<_>>();
@@ -227,7 +229,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
+    /// use shuftlib::cards::{deck::Deck, italian::ItalianCard};
     ///
     /// let deck: Deck<ItalianCard> = Deck::new();
     /// assert!(deck.is_empty());
@@ -240,7 +242,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
+    /// use shuftlib::cards::{deck::Deck, italian::ItalianCard};
     ///
     /// let deck: Deck<ItalianCard> = Deck::with_capacity(10);
     /// assert!(deck.is_empty());
@@ -255,12 +257,12 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{deck::Deck, italian::{ItalianCard, ItalianRank}, Suit};
+    /// use shuftlib::cards::{deck::Deck, italian::{ItalianCard, ItalianRank, Suit}};
     ///
     /// let cards = vec![
-    ///     ItalianCard::new(ItalianRank::Ace, Suit::Hearts),
-    ///     ItalianCard::new(ItalianRank::Two, Suit::Hearts),
-    ///     ItalianCard::new(ItalianRank::Three, Suit::Hearts),
+    ///     ItalianCard::new(ItalianRank::Ace, Suit::Coins),
+    ///     ItalianCard::new(ItalianRank::Two, Suit::Coins),
+    ///     ItalianCard::new(ItalianRank::Three, Suit::Coins),
     /// ];
     /// let deck: Deck<ItalianCard> = Deck::from(cards.clone());
     /// assert_eq!(deck.iter().count(), 3);
@@ -270,30 +272,11 @@ impl<T: Card> Deck<T> {
         self.cards.iter()
     }
 
-    /// Returns a mutable iterator over the cards in the deck.
-    ///
-    /// # Examples
-    /// ```
-    /// use shuftlib::core::{deck::Deck, italian::{ItalianCard, ItalianRank}, Suit};
-    ///
-    /// let mut deck = Deck::from(vec![
-    ///     ItalianCard::new(ItalianRank::Ace, Suit::Hearts),
-    ///     ItalianCard::new(ItalianRank::Two, Suit::Hearts),
-    /// ]);
-    /// for card in deck.iter_mut() {
-    ///     // Modify cards if needed
-    /// }
-    /// assert_eq!(deck.len(), 2);
-    /// ```
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
-        self.cards.iter_mut()
-    }
-
     /// Returns a slice of all cards in the deck.
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
+    /// use shuftlib::cards::{deck::Deck, italian::ItalianCard};
     ///
     /// let deck = Deck::italian();
     /// let slice = deck.as_slice();
@@ -303,31 +286,16 @@ impl<T: Card> Deck<T> {
         &self.cards
     }
 
-    /// Returns a mutable slice of all cards in the deck.
-    ///
-    /// # Examples
-    /// ```
-    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
-    ///
-    /// let mut deck = Deck::italian();
-    /// let slice = deck.as_mut_slice();
-    /// // Modify the slice if needed
-    /// assert_eq!(slice.len(), 40);
-    /// ```
-    pub fn as_mut_slice(&mut self) -> &mut [T] {
-        &mut self.cards
-    }
-
     /// Returns the number of cards left in the deck.
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{deck::Deck, italian::{ItalianCard, ItalianRank}, Suit};
+    /// use shuftlib::cards::{deck::Deck, italian::{ItalianCard, ItalianRank, Suit}};
     ///
     /// let cards = vec![
-    ///     ItalianCard::new(ItalianRank::Ace, Suit::Hearts),
-    ///     ItalianCard::new(ItalianRank::Two, Suit::Hearts),
-    ///     ItalianCard::new(ItalianRank::Three, Suit::Hearts),
+    ///     ItalianCard::new(ItalianRank::Ace, Suit::Coins),
+    ///     ItalianCard::new(ItalianRank::Two, Suit::Coins),
+    ///     ItalianCard::new(ItalianRank::Three, Suit::Coins),
     /// ];
     /// let deck: Deck<ItalianCard> = Deck::from(cards);
     /// assert_eq!(deck.len(), 3);
@@ -340,7 +308,7 @@ impl<T: Card> Deck<T> {
     ///
     /// # Examples
     /// ```
-    /// use shuftlib::core::{deck::Deck, italian::ItalianCard};
+    /// use shuftlib::cards::{deck::Deck, italian::ItalianCard};
     ///
     /// let deck: Deck<ItalianCard> = Deck::new();
     /// assert!(deck.is_empty());
@@ -388,23 +356,17 @@ impl<'a, T: Card> IntoIterator for &'a Deck<T> {
     }
 }
 
-impl<'a, T: Card> IntoIterator for &'a mut Deck<T> {
-    type Item = &'a mut T;
-    type IntoIter = std::slice::IterMut<'a, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.cards.iter_mut()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::Deck;
-    use crate::core::deck::test_utils::deck_strategy;
-    use crate::core::italian::ItalianCard;
-    use crate::core::italian::test_utils::italian_rank_strategy;
-    use crate::core::test_utils::suit_strategy;
+    use crate::cards::deck::test_utils::deck_strategy;
+    use crate::cards::italian::ItalianCard;
+    use crate::cards::italian::test_utils::italian_rank_strategy;
+    use crate::cards::italian::test_utils::suit_strategy;
+    use std::collections::BTreeSet;
+
     use proptest::prelude::*;
+    use rand::{SeedableRng, rngs::StdRng};
 
     #[test]
     fn shuffle_changes_order() {
@@ -416,11 +378,22 @@ mod tests {
         assert_ne!(sorted_deck.as_slice(), shuffled_deck.as_slice());
     }
 
+    /// Every position inside the deck, between the bottom and the top card,
+    /// can receive the card.
     #[test]
-    fn shuffle_empty_deck() {
-        let mut deck: Deck<ItalianCard> = Deck::new();
-        deck.shuffle(&mut rand::rng());
-        assert!(deck.is_empty());
+    fn shuffle_card_can_reach_every_position_inside_the_deck() {
+        let cards: Vec<ItalianCard> = Deck::italian().into_iter().collect();
+        let (outsider, rest) = cards.split_last().unwrap();
+        for len in 2..10 {
+            let reached: BTreeSet<usize> = (0..500)
+                .map(|seed| {
+                    let mut deck = Deck::from(rest[..len].to_vec());
+                    deck.shuffle_card(*outsider, &mut StdRng::seed_from_u64(seed));
+                    deck.iter().position(|card| card == outsider).unwrap()
+                })
+                .collect();
+            assert_eq!(reached, (1..len).collect(), "a deck of {len} cards");
+        }
     }
 
     #[test]
@@ -437,66 +410,42 @@ mod tests {
     }
 
     proptest! {
-        #[test]
-        fn shuffle_preserves_cards(
-            mut deck in deck_strategy(0..40)
-        ) {
-            let original: Vec<ItalianCard> = deck.as_slice().to_vec();
-            deck.shuffle(&mut rand::rng());
-            let shuffled: Vec<ItalianCard> = deck.as_slice().to_vec();
-
-            // Same length and same set of cards (order may differ)
-            prop_assert_eq!(original.len(), shuffled.len());
-            let mut original_sorted = original.clone();
-            let mut shuffled_sorted = shuffled.clone();
-            original_sorted.sort_by_key(|c: &ItalianCard| (c.rank() as u8, c.suit() as u8));
-            shuffled_sorted.sort_by_key(|c: &ItalianCard| (c.rank() as u8, c.suit() as u8));
-            prop_assert_eq!(original_sorted, shuffled_sorted);
-        }
-
-        #[test]
-        fn draw_all_cards_yields_unique(
-            mut deck in deck_strategy(0..40)
-        ) {
-            let mut seen = std::collections::HashSet::new();
-            while let Some(card) = deck.draw() {
-                prop_assert!(seen.insert(card));
-            }
-        }
-
+        /// Pushing and drawing act on the same end of the deck, the top:
+        /// the card pushed is the next one drawn, whatever is below it.
         #[test]
         fn push_and_draw_returns_same_card(
-            card in (italian_rank_strategy(), suit_strategy())
-        ) {
-            let mut deck = Deck::new();
-            let card = ItalianCard::new(card.0, card.1);
-            deck.push(card);
-            prop_assert_eq!(deck.draw(), Some(card));
-        }
-
-        #[test]
-        fn shuffle_card_inserts_card(
             card in (italian_rank_strategy(), suit_strategy()),
             mut deck in deck_strategy(0..40)
         ) {
             let card = ItalianCard::new(card.0, card.1);
-            let old_len: usize = deck.len();
-            deck.shuffle_card(card, &mut rand::rng());
-            prop_assert!(deck.as_slice().contains(&card));
-            prop_assert_eq!(deck.len(), old_len + 1);
+            let below = deck.len();
+            deck.push(card);
+            prop_assert_eq!(deck.draw(), Some(card));
+            prop_assert_eq!(deck.len(), below);
         }
 
+        /// The card goes into the deck once, and, for decks of two cards or
+        /// more, neither on top nor at the bottom.
         #[test]
-        fn shuffle_card_never_inserts_at_top_or_bottom_for_large_deck(
-            mut deck in deck_strategy(2..40),
-            card in (italian_rank_strategy(), suit_strategy())
+        fn shuffle_card_inserts_the_card_inside_the_deck(
+            card in (italian_rank_strategy(), suit_strategy()),
+            mut deck in deck_strategy(0..40)
         ) {
             let card = ItalianCard::new(card.0, card.1);
             prop_assume!(!deck.as_slice().contains(&card));
+            let old_len = deck.len();
             deck.shuffle_card(card, &mut rand::rng());
-            let pos = deck.as_slice().iter().position(|c| *c == card).unwrap();
-            let new_len = deck.len();
-            prop_assert!(pos != 0 && pos != new_len - 1);
+            prop_assert_eq!(deck.len(), old_len + 1);
+            let positions: Vec<_> = deck
+                .iter()
+                .enumerate()
+                .filter(|(_, other)| **other == card)
+                .map(|(position, _)| position)
+                .collect();
+            prop_assert_eq!(positions.len(), 1);
+            if old_len >= 2 {
+                prop_assert!(positions[0] != 0 && positions[0] != old_len);
+            }
         }
     }
 }
@@ -507,32 +456,16 @@ pub mod test_utils {
     use std::ops::Range;
 
     use super::*;
-    use crate::core::Suit;
-    use crate::core::italian::{ItalianCard, ItalianRank};
+    use crate::cards::italian::{ItalianCard, ItalianRank, Suit};
     use proptest::prelude::*;
 
     /// Generates a Deck<ItalianCard> with unique cards, of size in the given range.
     pub fn deck_strategy(size: Range<usize>) -> impl Strategy<Value = Deck<ItalianCard>> {
         // All possible unique cards
-        let all_cards: Vec<ItalianCard> = [
-            ItalianRank::Ace,
-            ItalianRank::Two,
-            ItalianRank::Three,
-            ItalianRank::Four,
-            ItalianRank::Five,
-            ItalianRank::Six,
-            ItalianRank::Seven,
-            ItalianRank::Jack,
-            ItalianRank::Knight,
-            ItalianRank::King,
-        ]
-        .iter()
-        .flat_map(|&rank| {
-            [Suit::Hearts, Suit::Diamonds, Suit::Clubs, Suit::Spades]
-                .iter()
-                .map(move |&suit| ItalianCard::new(rank, suit))
-        })
-        .collect();
+        let all_cards: Vec<ItalianCard> = ItalianRank::ALL
+            .into_iter()
+            .flat_map(|rank| Suit::ALL.map(|suit| ItalianCard::new(rank, suit)))
+            .collect();
 
         proptest::sample::subsequence(all_cards, size).prop_map(Deck::from)
     }
