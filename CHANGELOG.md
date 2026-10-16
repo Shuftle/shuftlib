@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/Shuftle/shuftlib/compare/v0.4.0...v0.5.0) - 2026-10-16
+
+### Other
+
+- Multiplayer rework ([#21](https://github.com/Shuftle/shuftlib/pull/21))
+- *(deps)* bump actions/checkout from 6 to 7 ([#20](https://github.com/Shuftle/shuftlib/pull/20))
+- CI refactor and updates ([#18](https://github.com/Shuftle/shuftlib/pull/18))
+
 ## [0.4.0](https://github.com/Shuftle/shuftlib/compare/v0.3.1...v0.4.0) - 2026-10-12
 
 ### Other
