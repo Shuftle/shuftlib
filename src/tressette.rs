@@ -66,6 +66,7 @@ use crate::{
 };
 
 mod card;
+pub mod declaration;
 mod table;
 mod trick;
 
