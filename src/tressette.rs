@@ -17,13 +17,20 @@
 //! Once every card has been played, each team scores a point for every three
 //! thirds it took (see [`TressetteCard::thirds`]), discarding the remainder,
 //! and the team that took the last trick scores one more point: eleven points
-//! per hand. A team wins when it has at least [`SCORE_TO_WIN`] points and
-//! more than the other team; otherwise a new hand is dealt.
+//! per hand between the teams.
+//!
+//! On its turn, before playing, a seat may make declarations (accusi): a
+//! napoli, the Ace, Two and Three of one suit, or three or four Threes, Twos
+//! or Aces (see [`declaration`]). Their points are added to the team's hand,
+//! but only if the team scored at least a point from its tricks, the last one
+//! included. On which tricks declarations are allowed, and what the other
+//! seats learn from them, is set by the [`Config`].
+//!
+//! A team wins when it has at least [`SCORE_TO_WIN`] points and more than the
+//! other team; otherwise a new hand is dealt.
 //!
 //! A seat that [forfeits](crate::engine::Session::forfeit) loses the game
 //! for its team.
-//!
-//! Declarations (accusi) are not supported yet.
 //!
 //! # Playing
 //!
@@ -31,12 +38,12 @@
 //! use rand::{SeedableRng, rngs::StdRng};
 //! use shuftlib::{
 //!     engine::{Observation, Session, Status},
-//!     tressette::Tressette,
+//!     tressette::{Config, Tressette},
 //! };
 //!
 //! // In a real game, the generator must be unpredictable, e.g. `rand::rng()`.
 //! let mut rng = StdRng::seed_from_u64(42);
-//! let mut session = Session::<Tressette>::new(());
+//! let mut session = Session::<Tressette>::new(Config::default());
 //! let outcome = loop {
 //!     match session.status() {
 //!         Status::Chance => {
@@ -71,11 +78,24 @@ mod table;
 mod trick;
 
 pub use card::TressetteCard;
+use declaration::Declaration;
 pub use table::{PerSeat, PerTeam, Seat, Team};
 pub use trick::{CompletedTrick, Trick};
 
 /// The score a team needs to win, provided it's ahead.
 pub const SCORE_TO_WIN: u8 = 31;
+
+/// The points a team must score from its tricks in a hand for its
+/// declarations to count.
+const TRICK_POINTS_FOR_DECLARATIONS: u8 = 1;
+
+/// The rules a game is played with. The default has declarations on the
+/// first three tricks, with full visibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Config {
+    /// When declarations may be made, and what other seats learn from them.
+    pub declarations: declaration::Rules,
+}
 
 /// The number of cards each seat is dealt.
 const HAND_SIZE: usize = 10;
@@ -86,6 +106,7 @@ const DEAL_BATCH: usize = 5;
 /// A game of Tressette. See the [module documentation](self) for the rules.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Tressette {
+    config: Config,
     score: PerTeam<u8>,
     /// The dealer of the current or last hand. `None` until the first deal.
     dealer: Option<Seat>,
@@ -97,8 +118,8 @@ pub struct Tressette {
 enum Phase {
     /// Waiting for the next hand to be dealt.
     AwaitingDeal,
-    /// A hand is being played.
-    Playing(Hand),
+    /// A hand is being played. Boxed, as it's much larger than the others.
+    Playing(Box<Hand>),
     /// The game is over.
     Over(Outcome),
 }
@@ -177,15 +198,34 @@ struct Hand {
     trick: Trick,
     /// The last trick completed, if any.
     last_trick: Option<CompletedTrick>,
+    /// What each seat declared this hand.
+    declared: PerSeat<Vec<Declaration>>,
 }
 
 impl Hand {
+    /// Returns the 1-based number of the trick being played.
+    fn current_trick(&self) -> usize {
+        let taken: usize = Team::ALL.iter().map(|&team| self.taken[team].len()).sum();
+        taken / Seat::ALL.len() + 1
+    }
+
     /// Returns what each team scores for this hand, once every card has been
-    /// played and `last_taker` took the last trick.
+    /// played and `last_taker` took the last trick: its points from tricks,
+    /// plus its declarations if those points are enough for them to count.
     fn points(&self, last_taker: Seat) -> PerTeam<u8> {
         PerTeam::from_fn(|team| {
             let thirds: u8 = self.taken[team].iter().map(TressetteCard::thirds).sum();
-            thirds / 3 + u8::from(team == last_taker.team())
+            let from_tricks = thirds / 3 + u8::from(team == last_taker.team());
+            if from_tricks < TRICK_POINTS_FOR_DECLARATIONS {
+                return from_tricks;
+            }
+            let declared: u8 = Seat::ALL
+                .iter()
+                .filter(|seat| seat.team() == team)
+                .flat_map(|&seat| &self.declared[seat])
+                .map(Declaration::points)
+                .sum();
+            from_tricks + declared
         })
     }
 }
@@ -195,6 +235,9 @@ impl Hand {
 pub enum Action {
     /// Plays a card from the hand.
     Play(TressetteCard),
+    /// Declares an accuso or a napoli held in the hand, before playing. The
+    /// seat keeps its turn.
+    Declare(Declaration),
 }
 
 /// Something that happened in the game.
@@ -217,6 +260,15 @@ pub enum Event {
         seat: Seat,
         /// The card played.
         card: TressetteCard,
+    },
+    /// A seat made a declaration.
+    Declared {
+        /// The seat that declared.
+        seat: Seat,
+        /// The points the declaration is worth.
+        points: u8,
+        /// The declaration, or `None` when the rules keep it hidden.
+        declaration: Option<Declaration>,
     },
     /// A trick was completed. Its taker leads the next one.
     TrickTaken {
@@ -278,6 +330,16 @@ pub enum Error {
         /// The suit that led the trick.
         required: Suit,
     },
+    /// The rules don't allow declarations on this trick.
+    #[error("declarations aren't allowed on this trick")]
+    DeclarationWindowClosed,
+    /// The declaration isn't held in the hand, was already made, or is
+    /// replaced by another (see [`declaration::allowed`]).
+    #[error("{declaration:?} can't be declared")]
+    CannotDeclare {
+        /// The declaration attempted.
+        declaration: Declaration,
+    },
 }
 
 /// The result of a finished game.
@@ -305,6 +367,7 @@ pub struct View {
     tricks_taken: PerTeam<usize>,
     score: PerTeam<u8>,
     dealer: Option<Seat>,
+    declarable: Vec<Declaration>,
 }
 
 impl View {
@@ -361,6 +424,13 @@ impl View {
             _ => Vec::new(),
         }
     }
+
+    /// Returns the declarations the observing seat may make now. Empty when
+    /// it's not that seat's turn, outside the tricks the rules allow, and for
+    /// a spectator.
+    pub fn declarable(&self) -> &[Declaration] {
+        &self.declarable
+    }
 }
 
 impl Observation for View {
@@ -374,7 +444,11 @@ impl Observation for View {
     }
 
     fn legal_actions(&self) -> Vec<Action> {
-        self.legal_cards().into_iter().map(Action::Play).collect()
+        self.legal_cards()
+            .into_iter()
+            .map(Action::Play)
+            .chain(self.declarable.iter().copied().map(Action::Declare))
+            .collect()
     }
 }
 
@@ -408,11 +482,12 @@ impl Tressette {
     /// Adds the `points` of the hand that just ended to the score, and either
     /// ends the game or waits for the next deal.
     fn score_hand(&mut self, points: PerTeam<u8>, events: &mut Events<Seat, Event>) {
-        // Scores stay far below 255: a hand is worth 11 points, an odd
-        // number, so a tie never survives the next hand, and the game ends as
-        // soon as a team at 31 or more is ahead: no score passes 30 + 2 * 11.
+        // The game ends as soon as a team at 31 or more is ahead, so scores
+        // only grow past that while the teams stay tied, which with
+        // declarations can happen. Reaching 255 would take a dozen tied hands
+        // in a row, so the score saturates there rather than wrapping.
         for team in Team::ALL {
-            self.score[team] += points[team];
+            self.score[team] = self.score[team].saturating_add(points[team]);
         }
         events.public(Event::HandScored {
             points,
@@ -437,7 +512,7 @@ impl Tressette {
 }
 
 impl Game for Tressette {
-    type Config = ();
+    type Config = Config;
     type Seat = Seat;
     type Action = Action;
     type Chance = Deal;
@@ -450,8 +525,9 @@ impl Game for Tressette {
         &Seat::ALL
     }
 
-    fn new((): &()) -> Self {
+    fn new(config: &Config) -> Self {
         Self {
+            config: *config,
             score: PerTeam::default(),
             dealer: None,
             phase: Phase::AwaitingDeal,
@@ -471,7 +547,29 @@ impl Game for Tressette {
             return Err(Error::NoHandInProgress);
         };
         let seat = turn.seat();
-        let Action::Play(card) = action;
+        let card = match action {
+            Action::Play(card) => card,
+            Action::Declare(declaration) => {
+                let rules = self.config.declarations;
+                if !rules.window.allows(hand.current_trick()) {
+                    return Err(Error::DeclarationWindowClosed);
+                }
+                if !declaration::allowed(&hand.cards[seat], &hand.declared[seat])
+                    .contains(&declaration)
+                {
+                    return Err(Error::CannotDeclare { declaration });
+                }
+                hand.declared[seat].push(declaration);
+                let mut events = Events::new();
+                events.public(Event::Declared {
+                    seat,
+                    points: declaration.points(),
+                    declaration: (rules.visibility == declaration::Visibility::Exact)
+                        .then_some(declaration),
+                });
+                return Ok(events);
+            }
+        };
         let held = &mut hand.cards[seat];
         let Some(position) = held.iter().position(|&held| held == card) else {
             return Err(Error::CardNotInHand { card });
@@ -535,12 +633,13 @@ impl Game for Tressette {
             );
         }
         self.dealer = Some(dealer);
-        self.phase = Phase::Playing(Hand {
+        self.phase = Phase::Playing(Box::new(Hand {
             cards: hands,
             taken: PerTeam::default(),
             trick: Trick::new(dealer.next()),
             last_trick: None,
-        });
+            declared: PerSeat::default(),
+        }));
         Ok(events)
     }
 
@@ -568,6 +667,15 @@ impl Game for Tressette {
             }),
             score: self.score,
             dealer: self.dealer,
+            declarable: hand
+                .zip(viewer.seat())
+                .filter(|(hand, seat)| {
+                    hand.trick.next_to_play() == *seat
+                        && self.config.declarations.window.allows(hand.current_trick())
+                })
+                .map_or(Vec::new(), |(hand, seat)| {
+                    declaration::allowed(&hand.cards[seat], &hand.declared[seat])
+                }),
         }
     }
 }
@@ -580,7 +688,8 @@ mod tests {
     use super::*;
     use crate::{
         cards::italian::ItalianRank,
-        engine::{ActError, ActResult, Audience, ChanceError, Session},
+        engine::{ActError, ActResult, Audience, ChanceError, Session, UpdateOf},
+        tressette::declaration::{Rules, Visibility, Window},
     };
 
     fn suit(suit: Suit) -> Vec<TressetteCard> {
@@ -607,16 +716,18 @@ mod tests {
     /// A hand in progress, dealt by North, with the given hands.
     fn playing(cards: PerSeat<Vec<TressetteCard>>) -> Session<Tressette> {
         Session::from_game(
-            (),
+            Config::default(),
             Tressette {
+                config: Config::default(),
                 score: PerTeam::default(),
                 dealer: Some(Seat::North),
-                phase: Phase::Playing(Hand {
+                phase: Phase::Playing(Box::new(Hand {
                     cards,
                     taken: PerTeam::default(),
                     trick: Trick::new(Seat::North.next()),
                     last_trick: None,
-                }),
+                    declared: PerSeat::default(),
+                })),
             },
         )
     }
@@ -719,7 +830,7 @@ mod tests {
     fn winner(score: PerTeam<u8>) -> Option<Team> {
         Tressette {
             score,
-            ..Tressette::new(&())
+            ..Tressette::new(&Config::default())
         }
         .winner()
     }
@@ -745,26 +856,44 @@ mod tests {
 
         /// However the deck ends up split between the teams, a hand is worth
         /// eleven points, and the team that took the last trick scores at
-        /// least the point for it.
+        /// least the point for it, even when it took nothing else.
         #[test]
         fn every_hand_is_worth_eleven_points(
-            north_south_takes in prop::collection::vec(any::<bool>(), 40),
+            north_south_takes in north_south_takes(),
             last_taker in seat(),
         ) {
-            let mut taken = PerTeam::<Vec<TressetteCard>>::default();
-            for (card, &takes) in deck().into_iter().zip(&north_south_takes) {
-                let team = if takes { Team::NorthSouth } else { Team::EastWest };
-                taken[team].push(card);
-            }
-            let hand = Hand {
-                cards: PerSeat::default(),
-                taken,
-                trick: Trick::new(last_taker),
-                last_trick: None,
-            };
+            let hand = split_deck(&north_south_takes, last_taker);
             let points = hand.points(last_taker);
             prop_assert_eq!(points.north_south + points.east_west, 11);
             prop_assert!(points[last_taker.team()] >= 1);
+        }
+
+        /// Declarations add their points to a team that scored at least a
+        /// point from its tricks, and nothing to a team that didn't.
+        #[test]
+        fn declarations_count_only_for_a_team_that_scored_from_its_tricks(
+            north_south_takes in north_south_takes(),
+            last_taker in seat(),
+            declared in declared_by_seat(),
+        ) {
+            let mut hand = split_deck(&north_south_takes, last_taker);
+            let from_tricks = hand.points(last_taker);
+            hand.declared = declared;
+            let points = hand.points(last_taker);
+            for team in Team::ALL {
+                let declared: u8 = Seat::ALL
+                    .iter()
+                    .filter(|seat| seat.team() == team)
+                    .flat_map(|&seat| &hand.declared[seat])
+                    .map(Declaration::points)
+                    .sum();
+                let expected = if from_tricks[team] >= TRICK_POINTS_FOR_DECLARATIONS {
+                    from_tricks[team] + declared
+                } else {
+                    from_tricks[team]
+                };
+                prop_assert_eq!(points[team], expected);
+            }
         }
 
         /// A deal with a card moved to another hand, dropped, or replaced by
@@ -793,7 +922,7 @@ mod tests {
                     deal.hands[from][card] = deal.hands[to][other];
                 }
             }
-            let mut session = Session::<Tressette>::new(());
+            let mut session = Session::<Tressette>::new(Config::default());
             let before = session.clone();
             prop_assert_eq!(
                 session.resolve_chance_with(deal),
@@ -807,10 +936,60 @@ mod tests {
         prop::sample::select(Seat::ALL.to_vec())
     }
 
+    /// The cards North and South take: any number of them, from none to the
+    /// whole deck, so that one team often takes little or nothing.
+    fn north_south_takes() -> impl Strategy<Value = Vec<TressetteCard>> {
+        let all: Vec<_> = deck().into_iter().collect();
+        let size = all.len();
+        prop::sample::subsequence(all, 0..=size)
+    }
+
+    /// A finished hand: North and South took `north_south_takes`, East and
+    /// West the rest of the deck, and `last_taker` took the last trick.
+    /// Nobody declared anything.
+    fn split_deck(north_south_takes: &[TressetteCard], last_taker: Seat) -> Hand {
+        let east_west_takes = deck()
+            .into_iter()
+            .filter(|card| !north_south_takes.contains(card))
+            .collect();
+        let taken = PerTeam {
+            north_south: north_south_takes.to_vec(),
+            east_west: east_west_takes,
+        };
+        Hand {
+            cards: PerSeat::default(),
+            taken,
+            trick: Trick::new(last_taker),
+            last_trick: None,
+            declared: PerSeat::default(),
+        }
+    }
+
+    /// Any declarations for each seat, whether or not they could be made.
+    fn declared_by_seat() -> impl Strategy<Value = PerSeat<Vec<Declaration>>> {
+        let all: Vec<_> = Declaration::all().collect();
+        let size = all.len();
+        let one = move || prop::sample::subsequence(all.clone(), 0..=size);
+        (one(), one(), one(), one()).prop_map(|(north, east, south, west)| PerSeat {
+            north,
+            east,
+            south,
+            west,
+        })
+    }
+
+    fn config() -> impl Strategy<Value = Config> {
+        let window = prop::sample::select(vec![Window::FirstTrick, Window::FirstThreeTricks]);
+        let visibility = prop::sample::select(vec![Visibility::Anonymous, Visibility::Exact]);
+        (window, visibility).prop_map(|(window, visibility)| Config {
+            declarations: Rules { window, visibility },
+        })
+    }
+
     #[test]
     fn drawn_deals_pass_on_and_the_next_seat_leads() {
         let mut rng = StdRng::seed_from_u64(9);
-        let mut session = Session::<Tressette>::new(());
+        let mut session = Session::<Tressette>::new(Config::default());
         session.resolve_chance(&mut rng).unwrap();
         let first = session.observe(Seat::North).dealer().unwrap();
         assert_eq!(to_act(&session), Some(first.next()));
@@ -850,7 +1029,7 @@ mod tests {
         );
 
         // Between hands too.
-        let mut session = Session::<Tressette>::new(());
+        let mut session = Session::<Tressette>::new(Config::default());
         session.forfeit(Seat::East).unwrap();
         assert!(matches!(
             session.status(),
@@ -867,7 +1046,7 @@ mod tests {
             dealer,
             hands: by_suit(),
         };
-        let mut session = Session::<Tressette>::new(());
+        let mut session = Session::<Tressette>::new(Config::default());
         session.resolve_chance_with(deal(Seat::North)).unwrap();
         assert_eq!(session.observe(Seat::South).hand(), suit(Suit::Swords));
         assert_eq!(to_act(&session), Some(Seat::West));
@@ -995,7 +1174,7 @@ mod tests {
                         ..Self::default()
                     };
                 }
-                Event::GameWon { .. } => {}
+                Event::Declared { .. } | Event::GameWon { .. } => {}
             }
         }
 
@@ -1035,13 +1214,16 @@ mod tests {
     /// accepts, and that rejected ones leave it unchanged.
     fn assert_legality_is_exact(session: &Session<Tressette>, seat: Seat) {
         let legal = session.observe(seat).legal_actions();
-        for card in deck() {
-            let action = Action::Play(card);
+        let actions = deck()
+            .into_iter()
+            .map(Action::Play)
+            .chain(Declaration::all().map(Action::Declare));
+        for action in actions {
             let mut attempt = session.clone();
             match attempt.act(seat, action) {
-                Ok(_) => assert!(legal.contains(&action), "{card} was accepted"),
+                Ok(_) => assert!(legal.contains(&action), "{action:?} was accepted"),
                 Err(ActError::Illegal(_)) => {
-                    assert!(!legal.contains(&action), "{card} was rejected");
+                    assert!(!legal.contains(&action), "{action:?} was rejected");
                     assert_eq!(&attempt, session);
                 }
                 Err(error) => panic!("unexpected error {error:?}"),
@@ -1052,15 +1234,67 @@ mod tests {
         }
     }
 
-    /// Plays a whole game with deals drawn from `deals` and random legal
-    /// actions from `choices`, plus the odd forfeit, checking invariants
-    /// along the way, and returns it.
-    fn play_out(deals: u64, choices: u64) -> Session<Tressette> {
+    /// Checks that `seat` is offered exactly the declarations it may still
+    /// make, and only on the tricks `config` allows.
+    fn assert_declarable_is_exact(session: &Session<Tressette>, config: Config, seat: Seat) {
+        let hand = session.game().phase.hand().unwrap();
+        // The seat to act has played one card per completed trick.
+        let trick = HAND_SIZE - hand.cards[seat].len() + 1;
+        let expected = if config.declarations.window.allows(trick) {
+            declaration::allowed(&hand.cards[seat], &hand.declared[seat])
+        } else {
+            Vec::new()
+        };
+        assert_eq!(session.observe(seat).declarable(), expected);
+    }
+
+    /// Checks that declaring `declaration` told everyone its points, and
+    /// which one it was only when `config` says so, and that `seat` kept the
+    /// turn.
+    fn assert_declared(
+        session: &Session<Tressette>,
+        config: Config,
+        seat: Seat,
+        declaration: Declaration,
+        update: &UpdateOf<Tressette>,
+    ) {
+        let shown = config.declarations.visibility == Visibility::Exact;
+        assert_eq!(
+            update.public_only().collect::<Vec<_>>(),
+            [&Event::Declared {
+                seat,
+                points: declaration.points(),
+                declaration: shown.then_some(declaration),
+            }]
+        );
+        assert_eq!(to_act(session), Some(seat));
+    }
+
+    /// Checks that a hand is worth eleven points plus the declarations of
+    /// every team that scored from its tricks: a team that didn't scores
+    /// nothing at all.
+    fn assert_hand_points(points: PerTeam<u8>, declared: PerTeam<u8>) {
+        let counted: u8 = Team::ALL
+            .iter()
+            .filter(|&&team| points[team] > 0)
+            .map(|&team| declared[team])
+            .sum();
+        assert_eq!(points.north_south + points.east_west, 11 + counted);
+        for team in Team::ALL {
+            assert!(points[team] == 0 || points[team] > declared[team]);
+        }
+    }
+
+    /// Plays a whole game under `config` with deals drawn from `deals` and
+    /// random legal actions from `choices`, plus the odd forfeit, checking
+    /// invariants along the way, and returns it.
+    fn play_out(config: Config, deals: u64, choices: u64) -> Session<Tressette> {
         let mut deals = StdRng::seed_from_u64(deals);
         let mut choices = StdRng::seed_from_u64(choices);
-        let mut session = Session::<Tressette>::new(());
+        let mut session = Session::<Tressette>::new(config);
         let mut trackers = PerSeat::<Tracker>::default();
         let mut spectator = Tracker::default();
+        let mut declared = PerTeam::<u8>::default();
         loop {
             let update = match session.status() {
                 Status::Chance => session.resolve_chance(&mut deals).unwrap(),
@@ -1069,13 +1303,18 @@ mod tests {
                         panic!("{seats:?} are waited on together");
                     };
                     assert_legality_is_exact(&session, seat);
+                    assert_declarable_is_exact(&session, config, seat);
                     if choices.random_ratio(1, 500) {
                         let quitter = Seat::ALL[choices.random_range(0..Seat::ALL.len())];
                         session.forfeit(quitter).unwrap()
                     } else {
                         let legal = session.observe(seat).legal_actions();
                         let action = legal[choices.random_range(0..legal.len())];
-                        session.act(seat, action).unwrap()
+                        let update = session.act(seat, action).unwrap();
+                        if let Action::Declare(declaration) = action {
+                            assert_declared(&session, config, seat, declaration, &update);
+                        }
+                        update
                     }
                 }
                 Status::Over(Outcome {
@@ -1101,8 +1340,11 @@ mod tests {
                     !matches!(event, Event::CardsReceived { .. }),
                     "{event:?} has the wrong audience"
                 );
-                if let Event::HandScored { points, .. } = event {
-                    assert_eq!(points.north_south + points.east_west, 11);
+                match event {
+                    Event::HandDealt { .. } => declared = PerTeam::default(),
+                    Event::Declared { seat, points, .. } => declared[seat.team()] += points,
+                    Event::HandScored { points, .. } => assert_hand_points(*points, declared),
+                    _ => {}
                 }
             }
             for seat in Seat::ALL {
@@ -1125,13 +1367,14 @@ mod tests {
         // Checking every card on every turn is slow: fewer games suffice.
         #![proptest_config(ProptestConfig::with_cases(32))]
 
-        /// Whole random games follow the rules: exactly the legal actions
-        /// are accepted, every seat's view matches what its events told it,
-        /// and the log replays into the same game.
+        /// Whole random games follow the rules under any declaration rules:
+        /// exactly the legal actions are accepted, declarations are offered,
+        /// announced and scored as the rules say, every seat's view matches
+        /// what its events told it, and the log replays into the same game.
         #[test]
-        fn random_games_follow_the_rules_and_replay(deals: u64, choices: u64) {
-            let session = play_out(deals, choices);
-            let replay = Session::<Tressette>::replay((), session.log().to_vec()).unwrap();
+        fn random_games_follow_the_rules_and_replay(config in config(), deals: u64, choices: u64) {
+            let session = play_out(config, deals, choices);
+            let replay = Session::<Tressette>::replay(config, session.log().to_vec()).unwrap();
             prop_assert_eq!(replay, session);
         }
     }

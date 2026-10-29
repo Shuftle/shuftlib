@@ -60,6 +60,16 @@ impl Declaration {
         }
     }
 
+    /// Returns every declaration there is: a napoli per suit, and three and
+    /// four of a kind of each declarable rank.
+    pub fn all() -> impl Iterator<Item = Self> {
+        let napoli = Suit::ALL.into_iter().map(Self::Napoli);
+        let accusi = DECLARABLE_RANKS
+            .into_iter()
+            .flat_map(|rank| [Size::Three, Size::Four].map(|size| Self::Accuso { rank, size }));
+        napoli.chain(accusi)
+    }
+
     /// Returns whether `hand` holds every card this declaration needs, and
     /// the rank is one that can be declared.
     pub fn can_declare(&self, hand: &[TressetteCard]) -> bool {
@@ -75,12 +85,40 @@ impl Declaration {
     }
 }
 
+/// Returns the declarations a seat holding `hand` may still make, having
+/// already made `declared`.
+///
+/// A napoli may share its cards with an accuso, but a seat makes at most one
+/// accuso per rank, and four of a kind replaces three: holding all four cards
+/// of a rank, only the four may be declared.
+pub fn allowed(hand: &[TressetteCard], declared: &[Declaration]) -> Vec<Declaration> {
+    Declaration::all()
+        .filter(|declaration| declaration.can_declare(hand))
+        .filter(|declaration| match *declaration {
+            Declaration::Napoli(_) => !declared.contains(declaration),
+            Declaration::Accuso { rank, size } => {
+                let replaced_by_four = size == Size::Three
+                    && Declaration::Accuso {
+                        rank,
+                        size: Size::Four,
+                    }
+                    .can_declare(hand);
+                let rank_taken = declared.iter().any(
+                    |made| matches!(made, Declaration::Accuso { rank: taken, .. } if *taken == rank),
+                );
+                !replaced_by_four && !rank_taken
+            }
+        })
+        .collect()
+}
+
 /// The turns of a hand on which a declaration may be made.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Window {
     /// Only on the first trick.
     FirstTrick,
     /// On any of the first three tricks.
+    #[default]
     FirstThreeTricks,
 }
 
@@ -98,16 +136,19 @@ impl Window {
 }
 
 /// What other seats learn when a declaration is made.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Visibility {
-    /// Everyone learns that a declaration was made, but not which one.
+    /// Everyone learns that a declaration was made and its points, but not
+    /// which one.
     Anonymous,
     /// Everyone learns the exact declaration.
+    #[default]
     Exact,
 }
 
-/// The declaration rules of one regional variant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// The declaration rules of one regional variant. The default allows
+/// declarations on the first three tricks, with full visibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Rules {
     /// The tricks on which a declaration may be made.
     pub window: Window,
@@ -175,7 +216,82 @@ mod tests {
         hand.iter().filter(|card| card.rank() == rank).count()
     }
 
+    fn declarations_strategy() -> impl Strategy<Value = Vec<Declaration>> {
+        let all: Vec<_> = Declaration::all().collect();
+        let size = all.len();
+        sample::subsequence(all, 0..=size)
+    }
+
+    /// Returns whether `declared` holds an accuso of `rank`, of either size.
+    fn accuso_declared(declared: &[Declaration], rank: ItalianRank) -> bool {
+        declared
+            .iter()
+            .any(|declaration| matches!(declaration, Declaration::Accuso { rank: declared, .. } if *declared == rank))
+    }
+
     proptest! {
+        /// Every napoli, and both sizes of accuso of every declarable rank,
+        /// is among all the declarations.
+        #[test]
+        fn all_declarations_cover_every_napoli_and_accuso(
+            suit in suit_strategy(),
+            rank in sample::select(DECLARABLE_RANKS.to_vec()),
+        ) {
+            let all: Vec<_> = Declaration::all().collect();
+            let three = Declaration::Accuso { rank, size: Size::Three };
+            let four = Declaration::Accuso { rank, size: Size::Four };
+            prop_assert!(all.contains(&Declaration::Napoli(suit)));
+            prop_assert!(all.contains(&three));
+            prop_assert!(all.contains(&four));
+        }
+
+        /// A napoli is allowed exactly when the hand holds it and it hasn't
+        /// been declared, whatever accusi were declared.
+        #[test]
+        fn a_napoli_is_allowed_when_held_and_not_yet_declared(
+            suit in suit_strategy(),
+            held in any::<bool>(),
+            hand in hand_strategy(),
+            declared in declarations_strategy(),
+        ) {
+            let hand = if held { with_cards(&hand, &napoli_cards(suit)) } else { hand };
+            let napoli = Declaration::Napoli(suit);
+            let expected = napoli.can_declare(&hand) && !declared.contains(&napoli);
+            prop_assert_eq!(allowed(&hand, &declared).contains(&napoli), expected);
+        }
+
+        /// Four of a kind is allowed exactly when the hand holds all four
+        /// cards of the rank and no accuso of it was declared.
+        #[test]
+        fn four_of_a_kind_is_allowed_when_held_and_the_rank_is_free(
+            rank in sample::select(DECLARABLE_RANKS.to_vec()),
+            copies in 0..=Size::Four as usize,
+            hand in hand_strategy(),
+            declared in declarations_strategy(),
+        ) {
+            let hand = with_cards(&hand, &cards_of_rank(rank, copies));
+            let four = Declaration::Accuso { rank, size: Size::Four };
+            let expected = copies_of(&hand, rank) == Size::Four as usize
+                && !accuso_declared(&declared, rank);
+            prop_assert_eq!(allowed(&hand, &declared).contains(&four), expected);
+        }
+
+        /// Three of a kind is allowed exactly when the hand holds three cards
+        /// of the rank, not all four, and no accuso of it was declared.
+        #[test]
+        fn three_of_a_kind_is_allowed_when_four_is_not_held_and_the_rank_is_free(
+            rank in sample::select(DECLARABLE_RANKS.to_vec()),
+            copies in 0..=Size::Four as usize,
+            hand in hand_strategy(),
+            declared in declarations_strategy(),
+        ) {
+            let hand = with_cards(&hand, &cards_of_rank(rank, copies));
+            let three = Declaration::Accuso { rank, size: Size::Three };
+            let expected = copies_of(&hand, rank) == Size::Three as usize
+                && !accuso_declared(&declared, rank);
+            prop_assert_eq!(allowed(&hand, &declared).contains(&three), expected);
+        }
+
         /// Any hand that holds a set can declare it, whatever else it holds.
         #[test]
         fn a_hand_holding_the_set_can_declare_it(
