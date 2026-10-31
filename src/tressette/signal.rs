@@ -18,6 +18,8 @@ pub enum Signal {
     /// The leader holds two or more other cards of the suit, all King or
     /// lower.
     Striscio,
+    /// Asks the leader's partner to play its best card of the suit.
+    Busso,
 }
 
 /// The card that opens a trick, with the signal given alongside it. It can
@@ -48,6 +50,7 @@ impl Lead {
             Signal::Volo => others == 0,
             Signal::Altra => others == 1 && all_low,
             Signal::Striscio => others >= 2 && all_low,
+            Signal::Busso => true,
         };
         if matches {
             Ok(Self { card, signal })
@@ -111,6 +114,13 @@ mod tests {
             let same_suit = same_suit(&hand, lead);
             let expected = same_suit.len() >= 2 && same_suit.iter().all(|card| *card < ace);
             prop_assert_eq!(Lead::parse(lead, Signal::Striscio, &hand).is_ok(), expected);
+        }
+
+        /// Busso asks for the partner's best card, so any lead may give it.
+        #[test]
+        fn busso_is_always_true(hand in hand_strategy(), pick in any::<Index>()) {
+            let lead = *pick.get(&hand);
+            prop_assert!(Lead::parse(lead, Signal::Busso, &hand).is_ok());
         }
     }
 }
