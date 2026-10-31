@@ -194,7 +194,7 @@ pub mod test_utils {
     use crate::tressette::deck;
     use proptest::{prelude::*, sample};
 
-    /// Generates a random Tressette card strategy for property testing.
+    /// Generates any Tressette card.
     pub fn tressette_card_strategy() -> impl Strategy<Value = TressetteCard> {
         italian_card_strategy().prop_map(TressetteCard::from)
     }

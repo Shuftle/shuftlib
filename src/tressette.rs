@@ -1,66 +1,65 @@
-//! Tressette for four players in two partnerships.
+//! Tressette for four players in two partnerships, played counter-clockwise.
 //!
-//! # Rules
-//!
-//! Partners sit opposite each other, North and South against East and West,
-//! and play goes counter-clockwise. Each hand, the dealer deals the whole
-//! deck, five cards at a time starting from the seat after them, so everyone
-//! holds ten cards. The first dealer is drawn at random; the deal then passes
-//! to the next seat.
-//!
-//! The seat after the dealer leads the first trick. Everyone must follow the
-//! suit that led the trick if they can, and may play anything otherwise. The
-//! strongest card of the led suit takes the trick, and its player leads the
-//! next one. From strongest to weakest, the ranks are Three, Two, Ace, King,
-//! Knight, Jack, Seven, Six, Five, Four.
-//!
-//! Once every card has been played, each team scores a point for every three
-//! thirds it took (see [`TressetteCard::thirds`]), discarding the remainder,
-//! and the team that took the last trick scores one more point: eleven points
-//! per hand between the teams.
-//!
-//! On its turn, before playing, a seat may make declarations (accusi): a
-//! napoli, the Ace, Two and Three of one suit, or three or four Threes, Twos
-//! or Aces (see [`declaration`]). Their points are added to the team's hand,
-//! but only if the team scored at least a point from its tricks, the last one
-//! included. On which tricks declarations are allowed, and what the other
-//! seats learn from them, is set by the [`Config`].
-//!
-//! A team wins when it has at least [`SCORE_TO_WIN`] points and more than the
-//! other team; otherwise a new hand is dealt.
-//!
-//! A seat that [forfeits](crate::engine::Session::forfeit) loses the game
-//! for its team.
+//! - Each seat must follow the led suit if it can; the strongest card of that
+//!   suit takes the trick. From strongest: Three, Two, Ace, King, Knight, Jack,
+//!   then Seven down to Four.
+//! - A hand is worth eleven points: a point per three thirds taken (see
+//!   [`TressetteCard::thirds`]), and one for the last trick.
+//! - A team wins with at least [`SCORE_TO_WIN`] points and more than the other.
+//! - Accusi ([`declaration`]) count only for a team that scored from its tricks.
+//! - Signals ([`signal`]) are given only with a lead.
+//! - When accusi may be made, what others learn from them, and which signals
+//!   are allowed are set by the [`Config`].
+//! - A seat that [forfeits](crate::engine::Session::forfeit) loses the game for
+//!   its team.
 //!
 //! # Playing
 //!
 //! ```
-//! use rand::{SeedableRng, rngs::StdRng};
+//! # use std::error::Error;
+//! use rand::{SeedableRng, rngs::StdRng, seq::IndexedRandom};
 //! use shuftlib::{
 //!     engine::{Observation, Session, Status},
-//!     tressette::{Config, Tressette},
+//!     tressette::{
+//!         Config, Tressette,
+//!         declaration::{Declarations, Visibility, Window},
+//!         signal::Signals,
+//!     },
 //! };
 //!
 //! // In a real game, the generator must be unpredictable, e.g. `rand::rng()`.
 //! let mut rng = StdRng::seed_from_u64(42);
-//! let mut session = Session::<Tressette>::new(Config::default());
+//! // Accusi on the first three tricks, told to everyone, and every signal allowed.
+//! let config = Config {
+//!     declarations: Declarations {
+//!         window: Window::FirstThreeTricks,
+//!         visibility: Visibility::Exact,
+//!     },
+//!     signals: Signals::all(),
+//! };
+//! let mut session = Session::<Tressette>::new(config);
 //! let outcome = loop {
 //!     match session.status() {
 //!         Status::Chance => {
 //!             session.resolve_chance(&mut rng)?;
 //!         }
+//!         // Tressette waits on one seat at a time, and it picks one of its
+//!         // legal actions: a card, a declaration, or a lead with a signal.
 //!         Status::ToAct(seats) => {
-//!             // Tressette waits on one seat at a time.
 //!             let seat = seats[0];
-//!             let view = session.observe(seat);
-//!             let action = view.legal_actions().into_iter().next().ok_or("no legal card")?;
+//!             let legal = session.observe(seat).legal_actions();
+//!             let action = *legal.choose(&mut rng).ok_or("no legal action")?;
 //!             session.act(seat, action)?;
 //!         }
 //!         Status::Over(outcome) => break outcome,
 //!     }
 //! };
 //! assert!(outcome.score[outcome.winner] >= 31);
-//! # Ok::<(), Box<dyn std::error::Error>>(())
+//!
+//! // The log holds every deal and every action: it replays on its own.
+//! let replay = Session::<Tressette>::replay(config, session.log().to_vec())?;
+//! assert_eq!(replay, session);
+//! # Ok::<(), Box<dyn Error>>(())
 //! ```
 
 use std::collections::HashSet;
@@ -96,13 +95,13 @@ pub const SCORE_TO_WIN: u8 = 31;
 const TRICK_POINTS_FOR_DECLARATIONS: u8 = 1;
 
 /// The rules a game is played with. The default has declarations on the
-/// first three tricks, with full visibility.
+/// first three tricks, with full visibility, and no signals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Config {
     /// When declarations may be made, and what other seats learn from them.
-    pub declarations: declaration::Rules,
+    pub declarations: declaration::Declarations,
     /// The signals a seat leading a trick may give.
-    pub signals: signal::Rules,
+    pub signals: signal::Signals,
 }
 
 /// The number of cards each seat is dealt.
@@ -218,7 +217,7 @@ impl Hand {
     /// Returns what a declaration by `seat` is read against, under `rules`.
     fn declaration_context(
         &self,
-        rules: declaration::Rules,
+        rules: declaration::Declarations,
         seat: Seat,
     ) -> declaration::Context<'_> {
         declaration::Context {
@@ -1345,10 +1344,9 @@ mod tests {
         assert_eq!(session.observe(seat).declarable(), expected);
     }
 
-    /// Checks that `seat` is offered a signalled lead exactly when it leads
-    /// the trick, for every card and signal the rules and its hand allow,
-    /// having already signalled in the suits marked in `signalled`, with the
-    /// suits marked in `led` already led this hand.
+    /// Checks that `seat` is offered exactly the signalled leads that
+    /// `Lead::new` accepts, given the suits it already `signalled` and the
+    /// suits already `led`.
     fn assert_signals_are_exact(
         session: &Session<Tressette>,
         config: Config,

@@ -39,7 +39,7 @@ impl Signal {
 /// The signals a variant allows. The default allows none: the game is played
 /// without signals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct Rules {
+pub struct Signals {
     volo: bool,
     altra: bool,
     striscio: bool,
@@ -47,11 +47,31 @@ pub struct Rules {
     ribusso: bool,
 }
 
-impl Rules {
-    /// Returns these rules with `signal` allowed as well.
-    pub fn allow(mut self, signal: Signal) -> Self {
-        *self.flag(signal) = true;
-        self
+impl Signals {
+    /// Allows every signal.
+    pub fn all() -> Self {
+        Self::only(Signal::ALL)
+    }
+
+    /// Allows no signal: the game is played without them.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Allows exactly `signals`.
+    ///
+    /// ```
+    /// use shuftlib::tressette::signal::{Signal, Signals};
+    ///
+    /// let signals = Signals::only([Signal::Busso, Signal::Volo]);
+    /// assert!(signals.allows(Signal::Busso) && !signals.allows(Signal::Striscio));
+    /// ```
+    pub fn only(signals: impl IntoIterator<Item = Signal>) -> Self {
+        let mut allowed = Self::default();
+        for signal in signals {
+            *allowed.flag(signal) = true;
+        }
+        allowed
     }
 
     /// Returns whether `signal` is allowed.
@@ -103,7 +123,7 @@ pub enum SignalRefusal {
 /// What a leader's signal is read against.
 pub(super) struct Context<'a> {
     /// The signals the variant allows.
-    pub rules: Rules,
+    pub rules: Signals,
     /// The leader's cards before it leads.
     pub hand: &'a [TressetteCard],
     /// The trick the signal would be given on.
@@ -114,9 +134,7 @@ pub(super) struct Context<'a> {
     pub led: PerSuit<bool>,
 }
 
-/// The card that opens a trick, with the signal given alongside it. It can
-/// only be built from a hand that matches the signal, so every `Lead` is
-/// honest.
+/// The card that opens a trick, with a signal the leader's hand matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Lead {
     play: Play,
@@ -124,8 +142,8 @@ pub(crate) struct Lead {
 }
 
 impl Lead {
-    /// Reads `signal` on `card` against `context`, or says why it can't be
-    /// given.
+    /// Builds the lead of `card` with `signal` in `context`, or returns why
+    /// it can't be given.
     pub(super) fn new(
         card: TressetteCard,
         signal: Signal,
@@ -216,7 +234,7 @@ pub(super) fn allowed(context: &Context) -> Vec<Lead> {
 #[cfg(test)]
 /// Test utilities for the signal module.
 pub mod test_utils {
-    use super::{Rules, Signal};
+    use super::{Signal, Signals};
     use proptest::{prelude::*, sample};
 
     /// Generates any signal.
@@ -230,9 +248,8 @@ pub mod test_utils {
     }
 
     /// Generates any signal rules, from none allowed to all of them.
-    pub fn rules_strategy() -> impl Strategy<Value = Rules> {
-        signals_strategy()
-            .prop_map(|allowed| allowed.into_iter().fold(Rules::default(), Rules::allow))
+    pub fn rules_strategy() -> impl Strategy<Value = Signals> {
+        signals_strategy().prop_map(Signals::only)
     }
 }
 
@@ -261,7 +278,7 @@ mod tests {
     /// A context for `hand` in which every signal is allowed.
     fn any_signal(hand: &[TressetteCard]) -> Context<'_> {
         Context {
-            rules: Signal::ALL.into_iter().fold(Rules::default(), Rules::allow),
+            rules: Signals::all(),
             hand,
             trick: Trick::new(Seat::North),
             signalled: PerSuit::default(),
@@ -335,9 +352,21 @@ mod tests {
             prop_assert_eq!(Lead::new(lead, Signal::Ribusso, &any_signal(&hand)).is_ok(), expected);
         }
 
+        /// `only` allows exactly the signals it's given, `all` every one, and
+        /// `none` none.
+        #[test]
+        fn only_allows_exactly_the_signals_given(allowed in signals_strategy()) {
+            let only = Signals::only(allowed.iter().copied());
+            for signal in Signal::ALL {
+                prop_assert_eq!(only.allows(signal), allowed.contains(&signal));
+                prop_assert!(Signals::all().allows(signal));
+                prop_assert!(!Signals::none().allows(signal));
+            }
+        }
+
         /// A signal can be given exactly when the rules allow it and the hand
         /// matches it, and a refusal says which of the two failed, the rules
-        /// first, telling a game without signals from a signal left out.
+        /// first.
         #[test]
         fn a_signal_is_given_exactly_when_allowed_and_true(
             hand in hand_strategy(),
@@ -346,7 +375,7 @@ mod tests {
             allowed in signals_strategy(),
         ) {
             let lead = *pick.get(&hand);
-            let rules = allowed.iter().copied().fold(Rules::default(), Rules::allow);
+            let rules = Signals::only(allowed.iter().copied());
             let matches_hand = Lead::new(lead, signal, &any_signal(&hand)).is_ok();
             let refused = |reason| Err(Error::CannotSignal { signal, reason });
             let expected = if allowed.is_empty() {
@@ -421,7 +450,7 @@ mod tests {
             let mut trick = Trick::new(leader);
             trick.play(played);
             let context = Context {
-                rules: allowed.into_iter().fold(Rules::default(), Rules::allow),
+                rules: Signals::only(allowed),
                 hand: &hand,
                 trick,
                 signalled: PerSuit::default(),

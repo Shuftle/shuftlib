@@ -1,9 +1,8 @@
 //! Declarations (accusi) of Tressette: the napoli, and sets of three or four
 //! cards of one rank.
 //!
-//! What counts as a declaration, and when it may be made, depends on the
-//! regional variant, so the timing and visibility are a [`Rules`] value rather
-//! than fixed behaviour.
+//! When declarations may be made, and what others learn from them, depends on
+//! the regional variant: see [`Declarations`].
 
 use crate::cards::italian::{ItalianRank, Suit};
 
@@ -109,7 +108,7 @@ impl Declaration {
 /// What a seat's declaration is read against.
 pub(super) struct Context<'a> {
     /// The tricks on which the variant allows declarations.
-    pub rules: Rules,
+    pub rules: Declarations,
     /// The 1-based number of the trick being played.
     pub trick: usize,
     /// The seat's cards.
@@ -118,8 +117,7 @@ pub(super) struct Context<'a> {
     pub declared: &'a [Declared],
 }
 
-/// A declaration a seat has made. It can only be built from a declaration
-/// the rules allowed, so every `Declared` was legal when it was made.
+/// A declaration a seat made, as the rules allowed it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Declared(Declaration);
 
@@ -129,8 +127,8 @@ impl Declared {
         self.0
     }
 
-    /// Reads `declaration` against `context`, or says why it can't be made:
-    /// when several reasons apply, the first of
+    /// Builds `declaration` as made in `context`, or returns why it can't
+    /// be made: when several reasons apply, the first of
     /// [`WindowClosed`](DeclarationRefusal::WindowClosed),
     /// [`NotHeld`](DeclarationRefusal::NotHeld),
     /// [`AlreadyDeclared`](DeclarationRefusal::AlreadyDeclared) and
@@ -241,7 +239,7 @@ pub enum Visibility {
 /// The declaration rules of one regional variant. The default allows
 /// declarations on the first three tricks, with full visibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct Rules {
+pub struct Declarations {
     /// The tricks on which a declaration may be made.
     pub window: Window,
     /// What other seats learn from a declaration.
@@ -251,7 +249,7 @@ pub struct Rules {
 #[cfg(test)]
 /// Test utilities for the declaration module.
 pub mod test_utils {
-    use super::{DeclarableRank, Declaration, Declared, Rules, Visibility, Window};
+    use super::{DeclarableRank, Declaration, Declarations, Declared, Visibility, Window};
     use crate::tressette::PerSeat;
     use proptest::{prelude::*, sample};
 
@@ -296,10 +294,10 @@ pub mod test_utils {
     }
 
     /// Generates any declaration rules.
-    pub fn rules_strategy() -> impl Strategy<Value = Rules> {
+    pub fn rules_strategy() -> impl Strategy<Value = Declarations> {
         let window = sample::select(vec![Window::FirstTrick, Window::FirstThreeTricks]);
         let visibility = sample::select(vec![Visibility::Anonymous, Visibility::Exact]);
-        (window, visibility).prop_map(|(window, visibility)| Rules { window, visibility })
+        (window, visibility).prop_map(|(window, visibility)| Declarations { window, visibility })
     }
 }
 
@@ -360,7 +358,7 @@ mod tests {
     ) -> Vec<Declaration> {
         let declared: Vec<_> = declared.iter().copied().map(Declared).collect();
         allowed(&Context {
-            rules: Rules::default(),
+            rules: Declarations::default(),
             trick: 1,
             hand,
             declared: &declared,
@@ -558,10 +556,9 @@ mod tests {
             );
         }
 
-        /// On the first trick, which every window allows, a declaration can be
-        /// made exactly when the hand holds it, neither it nor an accuso of its
-        /// rank was declared, and it isn't three of a kind while holding all
-        /// four; a refusal names the first of these that fails.
+        /// On the first trick, a declaration is made exactly when held and not
+        /// yet made, three of a kind giving way to four; a refusal names the
+        /// first rule broken.
         #[test]
         fn a_declaration_is_made_exactly_when_held_and_free(
             rules in rules_strategy(),

@@ -162,8 +162,8 @@ fn plays<I: IntoIterator<Item = TressetteCard>>(
 pub(crate) struct Play(TressetteCard);
 
 impl Play {
-    /// Reads `card` as played from `hand` on `trick`, or says why it can't
-    /// be.
+    /// Builds the play of `card` from `hand` on `trick`, or returns why it
+    /// can't be played.
     pub(crate) fn new(
         card: TressetteCard,
         hand: &[TressetteCard],
