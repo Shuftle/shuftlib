@@ -387,7 +387,7 @@ pub enum Error {
         required: Suit,
     },
     /// The declaration can't be made now.
-    #[error("{declaration:?} can't be declared: {reason}")]
+    #[error("{declaration} can't be declared: {reason}")]
     CannotDeclare {
         /// The declaration attempted.
         declaration: Declaration,

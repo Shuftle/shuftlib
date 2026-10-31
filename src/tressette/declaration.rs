@@ -4,6 +4,8 @@
 //! When declarations may be made, and what others learn from them, depends on
 //! the regional variant: see [`Declarations`].
 
+use std::fmt::{self, Display};
+
 use crate::cards::italian::{ItalianRank, Suit};
 
 use super::{Error, TressetteCard};
@@ -65,6 +67,26 @@ pub enum Declaration {
         /// How many cards of that rank.
         size: Size,
     },
+}
+
+impl Display for Declaration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Napoli(suit) => write!(f, "napoli of {suit}"),
+            Self::Accuso { rank, size } => {
+                let count = match size {
+                    Size::Three => "three",
+                    Size::Four => "four",
+                };
+                let ranks = match rank {
+                    DeclarableRank::Three => "Threes",
+                    DeclarableRank::Two => "Twos",
+                    DeclarableRank::Ace => "Aces",
+                };
+                write!(f, "{count} {ranks}")
+            }
+        }
+    }
 }
 
 impl Declaration {
@@ -220,7 +242,7 @@ impl Window {
     pub fn allows(self, trick: usize) -> bool {
         match self {
             Self::FirstTrick => trick == 1,
-            Self::FirstThreeTricks => trick <= LAST_TRICK_OF_FIRST_THREE,
+            Self::FirstThreeTricks => (1..=LAST_TRICK_OF_FIRST_THREE).contains(&trick),
         }
     }
 }
@@ -598,10 +620,10 @@ mod tests {
 
         /// The first-three-tricks window allows exactly tricks 1 to 3.
         #[test]
-        fn first_three_tricks_window_allows_tricks_one_to_three(trick in 1..=HAND_SIZE) {
+        fn first_three_tricks_window_allows_tricks_one_to_three(trick in 0..=HAND_SIZE) {
             prop_assert_eq!(
                 Window::FirstThreeTricks.allows(trick),
-                trick <= LAST_TRICK_OF_FIRST_THREE
+                (1..=LAST_TRICK_OF_FIRST_THREE).contains(&trick)
             );
         }
     }
