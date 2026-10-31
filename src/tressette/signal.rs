@@ -15,6 +15,9 @@ pub enum Signal {
     Volo,
     /// The leader holds exactly one other card of the suit, King or lower.
     Altra,
+    /// The leader holds two or more other cards of the suit, all King or
+    /// lower.
+    Striscio,
 }
 
 /// The card that opens a trick, with the signal given alongside it. It can
@@ -34,18 +37,17 @@ impl Lead {
         signal: Signal,
         hand: &[TressetteCard],
     ) -> Result<Self, Error> {
-        let mut same_suit = hand
+        let ace = TressetteCard::new(ItalianRank::Ace, card.suit());
+        let (others, all_low) = hand
             .iter()
-            .filter(|held| held.suit() == card.suit() && **held != card);
+            .filter(|held| held.suit() == card.suit() && **held != card)
+            .fold((0, true), |(count, all_low), held| {
+                (count + 1, all_low && *held < ace)
+            });
         let matches = match signal {
-            Signal::Volo => same_suit.next().is_none(),
-            Signal::Altra => {
-                let ace = TressetteCard::new(ItalianRank::Ace, card.suit());
-                matches!(
-                    (same_suit.next(), same_suit.next()),
-                    (Some(other), None) if *other < ace
-                )
-            }
+            Signal::Volo => others == 0,
+            Signal::Altra => others == 1 && all_low,
+            Signal::Striscio => others >= 2 && all_low,
         };
         if matches {
             Ok(Self { card, signal })
@@ -95,6 +97,20 @@ mod tests {
             let ace = TressetteCard::new(ItalianRank::Ace, lead.suit());
             let expected = same_suit.len() == 1 && same_suit[0] < ace;
             prop_assert_eq!(Lead::parse(lead, Signal::Altra, &hand).is_ok(), expected);
+        }
+
+        /// Striscio is true exactly when the leader holds two or more other
+        /// cards of the suit led, all King or lower.
+        #[test]
+        fn striscio_is_true_exactly_when_only_low_cards_of_the_suit_are_left(
+            hand in hand_strategy(),
+            pick in any::<Index>(),
+        ) {
+            let lead = *pick.get(&hand);
+            let ace = TressetteCard::new(ItalianRank::Ace, lead.suit());
+            let same_suit = same_suit(&hand, lead);
+            let expected = same_suit.len() >= 2 && same_suit.iter().all(|card| *card < ace);
+            prop_assert_eq!(Lead::parse(lead, Signal::Striscio, &hand).is_ok(), expected);
         }
     }
 }
