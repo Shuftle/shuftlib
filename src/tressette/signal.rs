@@ -1,8 +1,8 @@
 //! Signals of Tressette: what the seat leading a trick may say about the suit
 //! it leads, such as "volo" for its last card of that suit.
 //!
-//! Signals are never bluffs: a [`Lead`] only exists when the leader's hand
-//! matches its signal.
+//! Signals are never bluffs: a signal is only accepted when the leader's hand
+//! matches it.
 
 use crate::cards::italian::{ItalianRank, PerSuit};
 
@@ -118,7 +118,7 @@ pub(super) struct Context<'a> {
 /// only be built from a hand that matches the signal, so every `Lead` is
 /// honest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Lead {
+pub(crate) struct Lead {
     play: Play,
     signal: Signal,
 }
@@ -188,7 +188,7 @@ impl Lead {
     }
 
     /// Returns the card led.
-    pub fn card(&self) -> TressetteCard {
+    pub(crate) fn card(&self) -> TressetteCard {
         self.play.card()
     }
 
@@ -198,7 +198,7 @@ impl Lead {
     }
 
     /// Returns the signal given.
-    pub fn signal(&self) -> Signal {
+    pub(crate) fn signal(&self) -> Signal {
         self.signal
     }
 }
