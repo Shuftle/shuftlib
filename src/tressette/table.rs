@@ -249,10 +249,22 @@ impl<T> IndexMut<Team> for PerTeam<T> {
 }
 
 #[cfg(test)]
-mod tests {
+/// Test utilities for the Tressette table module.
+pub mod test_utils {
+    use super::Seat;
     use proptest::{prelude::*, sample};
 
-    use super::{PerSeat, Seat};
+    /// Generates any seat.
+    pub fn seat_strategy() -> impl Strategy<Value = Seat> {
+        sample::select(Seat::ALL.to_vec())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use super::{PerSeat, Seat, test_utils::seat_strategy};
 
     #[test]
     fn values_for_each_seat_are_built_in_play_order() {
@@ -299,7 +311,7 @@ mod tests {
     proptest! {
         #[test]
         fn after_takes_that_many_turns(
-            seat in sample::select(Seat::ALL.to_vec()),
+            seat in seat_strategy(),
             steps in 0usize..100,
         ) {
             let walked = (0..steps).fold(seat, |seat, _| seat.next());

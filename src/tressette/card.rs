@@ -185,3 +185,25 @@ impl TressetteCard {
         TressetteCard { card }
     }
 }
+
+#[cfg(test)]
+/// Test utilities for the Tressette card module.
+pub mod test_utils {
+    use super::TressetteCard;
+    use crate::cards::italian::test_utils::italian_card_strategy;
+    use crate::tressette::deck;
+    use proptest::{prelude::*, sample};
+
+    /// Generates a random Tressette card strategy for property testing.
+    pub fn tressette_card_strategy() -> impl Strategy<Value = TressetteCard> {
+        italian_card_strategy().prop_map(TressetteCard::from)
+    }
+
+    /// Generates any set of distinct Tressette cards, from none to the whole
+    /// deck.
+    pub fn cards_strategy() -> impl Strategy<Value = Vec<TressetteCard>> {
+        let all: Vec<_> = deck().into_iter().collect();
+        let size = all.len();
+        sample::subsequence(all, 0..=size)
+    }
+}

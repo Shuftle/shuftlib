@@ -74,11 +74,13 @@ use crate::{
 
 mod card;
 pub mod declaration;
+pub mod signal;
 mod table;
 mod trick;
 
 pub use card::TressetteCard;
 use declaration::Declaration;
+use signal::Signal;
 pub use table::{PerSeat, PerTeam, Seat, Team};
 pub use trick::{CompletedTrick, Trick};
 
@@ -339,6 +341,12 @@ pub enum Error {
     CannotDeclare {
         /// The declaration attempted.
         declaration: Declaration,
+    },
+    /// The leader's hand doesn't match the signal.
+    #[error("the hand doesn't match {signal:?}")]
+    FalseSignal {
+        /// The signal given.
+        signal: Signal,
     },
 }
 
@@ -681,6 +689,18 @@ impl Game for Tressette {
 }
 
 #[cfg(test)]
+/// Test utilities for the Tressette module.
+pub mod test_utils {
+    use super::{Config, declaration::test_utils::rules_strategy};
+    use proptest::prelude::*;
+
+    /// Generates any game configuration.
+    pub fn config_strategy() -> impl Strategy<Value = Config> {
+        rules_strategy().prop_map(|declarations| Config { declarations })
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::StdRng};
@@ -689,7 +709,12 @@ mod tests {
     use crate::{
         cards::italian::ItalianRank,
         engine::{ActError, ActResult, Audience, ChanceError, Session, UpdateOf},
-        tressette::declaration::{Rules, Visibility, Window},
+        tressette::{
+            card::test_utils::cards_strategy,
+            declaration::{Visibility, test_utils::declared_by_seat_strategy},
+            table::test_utils::seat_strategy,
+            test_utils::config_strategy,
+        },
     };
 
     fn suit(suit: Suit) -> Vec<TressetteCard> {
@@ -859,8 +884,8 @@ mod tests {
         /// least the point for it, even when it took nothing else.
         #[test]
         fn every_hand_is_worth_eleven_points(
-            north_south_takes in north_south_takes(),
-            last_taker in seat(),
+            north_south_takes in cards_strategy(),
+            last_taker in seat_strategy(),
         ) {
             let hand = split_deck(&north_south_takes, last_taker);
             let points = hand.points(last_taker);
@@ -872,9 +897,9 @@ mod tests {
         /// point from its tricks, and nothing to a team that didn't.
         #[test]
         fn declarations_count_only_for_a_team_that_scored_from_its_tricks(
-            north_south_takes in north_south_takes(),
-            last_taker in seat(),
-            declared in declared_by_seat(),
+            north_south_takes in cards_strategy(),
+            last_taker in seat_strategy(),
+            declared in declared_by_seat_strategy(),
         ) {
             let mut hand = split_deck(&north_south_takes, last_taker);
             let from_tricks = hand.points(last_taker);
@@ -901,8 +926,8 @@ mod tests {
         #[test]
         fn incomplete_deals_are_rejected(
             seed: u64,
-            from in seat(),
-            to in seat(),
+            from in seat_strategy(),
+            to in seat_strategy(),
             card in 0usize..HAND_SIZE,
             other in 0usize..HAND_SIZE,
             mistake in 0u8..3,
@@ -932,18 +957,6 @@ mod tests {
         }
     }
 
-    fn seat() -> impl Strategy<Value = Seat> {
-        prop::sample::select(Seat::ALL.to_vec())
-    }
-
-    /// The cards North and South take: any number of them, from none to the
-    /// whole deck, so that one team often takes little or nothing.
-    fn north_south_takes() -> impl Strategy<Value = Vec<TressetteCard>> {
-        let all: Vec<_> = deck().into_iter().collect();
-        let size = all.len();
-        prop::sample::subsequence(all, 0..=size)
-    }
-
     /// A finished hand: North and South took `north_south_takes`, East and
     /// West the rest of the deck, and `last_taker` took the last trick.
     /// Nobody declared anything.
@@ -963,27 +976,6 @@ mod tests {
             last_trick: None,
             declared: PerSeat::default(),
         }
-    }
-
-    /// Any declarations for each seat, whether or not they could be made.
-    fn declared_by_seat() -> impl Strategy<Value = PerSeat<Vec<Declaration>>> {
-        let all: Vec<_> = Declaration::all().collect();
-        let size = all.len();
-        let one = move || prop::sample::subsequence(all.clone(), 0..=size);
-        (one(), one(), one(), one()).prop_map(|(north, east, south, west)| PerSeat {
-            north,
-            east,
-            south,
-            west,
-        })
-    }
-
-    fn config() -> impl Strategy<Value = Config> {
-        let window = prop::sample::select(vec![Window::FirstTrick, Window::FirstThreeTricks]);
-        let visibility = prop::sample::select(vec![Visibility::Anonymous, Visibility::Exact]);
-        (window, visibility).prop_map(|(window, visibility)| Config {
-            declarations: Rules { window, visibility },
-        })
     }
 
     #[test]
@@ -1372,7 +1364,7 @@ mod tests {
         /// announced and scored as the rules say, every seat's view matches
         /// what its events told it, and the log replays into the same game.
         #[test]
-        fn random_games_follow_the_rules_and_replay(config in config(), deals: u64, choices: u64) {
+        fn random_games_follow_the_rules_and_replay(config in config_strategy(), deals: u64, choices: u64) {
             let session = play_out(config, deals, choices);
             let replay = Session::<Tressette>::replay(config, session.log().to_vec()).unwrap();
             prop_assert_eq!(replay, session);

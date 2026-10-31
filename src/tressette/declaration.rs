@@ -157,32 +157,63 @@ pub struct Rules {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::cards::italian::test_utils::{italian_rank_strategy, suit_strategy};
-    use crate::tressette::HAND_SIZE;
+/// Test utilities for the declaration module.
+pub mod test_utils {
+    use super::{DECLARABLE_RANKS, Declaration, Rules, Visibility, Window};
+    use crate::cards::italian::ItalianRank;
+    use crate::tressette::PerSeat;
     use proptest::{prelude::*, sample};
 
-    fn all_cards() -> Vec<TressetteCard> {
-        ItalianRank::ALL
-            .iter()
-            .flat_map(|&rank| {
-                Suit::ALL
-                    .iter()
-                    .map(move |&suit| TressetteCard::new(rank, suit))
+    /// Generates any rank that can be declared as a set.
+    pub fn declarable_rank_strategy() -> impl Strategy<Value = ItalianRank> {
+        sample::select(DECLARABLE_RANKS.to_vec())
+    }
+
+    /// Generates any set of distinct declarations, whether or not they could
+    /// be made.
+    pub fn declarations_strategy() -> impl Strategy<Value = Vec<Declaration>> {
+        let all: Vec<_> = Declaration::all().collect();
+        let size = all.len();
+        sample::subsequence(all, 0..=size)
+    }
+
+    /// Generates any declarations for each seat, whether or not they could be
+    /// made.
+    pub fn declared_by_seat_strategy() -> impl Strategy<Value = PerSeat<Vec<Declaration>>> {
+        (
+            declarations_strategy(),
+            declarations_strategy(),
+            declarations_strategy(),
+            declarations_strategy(),
+        )
+            .prop_map(|(north, east, south, west)| PerSeat {
+                north,
+                east,
+                south,
+                west,
             })
-            .collect()
     }
 
-    fn hand_strategy() -> impl Strategy<Value = Vec<TressetteCard>> {
-        let deck = all_cards();
-        let size = deck.len();
-        sample::subsequence(deck, 0..=size)
+    /// Generates any declaration rules.
+    pub fn rules_strategy() -> impl Strategy<Value = Rules> {
+        let window = sample::select(vec![Window::FirstTrick, Window::FirstThreeTricks]);
+        let visibility = sample::select(vec![Visibility::Anonymous, Visibility::Exact]);
+        (window, visibility).prop_map(|(window, visibility)| Rules { window, visibility })
     }
+}
 
-    fn card_strategy() -> impl Strategy<Value = TressetteCard> {
-        sample::select(all_cards())
-    }
+#[cfg(test)]
+mod tests {
+    use super::{
+        test_utils::{declarable_rank_strategy, declarations_strategy},
+        *,
+    };
+    use crate::cards::italian::test_utils::{italian_rank_strategy, suit_strategy};
+    use crate::tressette::{
+        HAND_SIZE,
+        card::test_utils::{cards_strategy, tressette_card_strategy},
+    };
+    use proptest::prelude::*;
 
     /// Returns `hand` with every card of `cards` it does not already hold.
     fn with_cards(hand: &[TressetteCard], cards: &[TressetteCard]) -> Vec<TressetteCard> {
@@ -216,12 +247,6 @@ mod tests {
         hand.iter().filter(|card| card.rank() == rank).count()
     }
 
-    fn declarations_strategy() -> impl Strategy<Value = Vec<Declaration>> {
-        let all: Vec<_> = Declaration::all().collect();
-        let size = all.len();
-        sample::subsequence(all, 0..=size)
-    }
-
     /// Returns whether `declared` holds an accuso of `rank`, of either size.
     fn accuso_declared(declared: &[Declaration], rank: ItalianRank) -> bool {
         declared
@@ -235,7 +260,7 @@ mod tests {
         #[test]
         fn all_declarations_cover_every_napoli_and_accuso(
             suit in suit_strategy(),
-            rank in sample::select(DECLARABLE_RANKS.to_vec()),
+            rank in declarable_rank_strategy(),
         ) {
             let all: Vec<_> = Declaration::all().collect();
             let three = Declaration::Accuso { rank, size: Size::Three };
@@ -251,7 +276,7 @@ mod tests {
         fn a_napoli_is_allowed_when_held_and_not_yet_declared(
             suit in suit_strategy(),
             held in any::<bool>(),
-            hand in hand_strategy(),
+            hand in cards_strategy(),
             declared in declarations_strategy(),
         ) {
             let hand = if held { with_cards(&hand, &napoli_cards(suit)) } else { hand };
@@ -264,9 +289,9 @@ mod tests {
         /// cards of the rank and no accuso of it was declared.
         #[test]
         fn four_of_a_kind_is_allowed_when_held_and_the_rank_is_free(
-            rank in sample::select(DECLARABLE_RANKS.to_vec()),
+            rank in declarable_rank_strategy(),
             copies in 0..=Size::Four as usize,
-            hand in hand_strategy(),
+            hand in cards_strategy(),
             declared in declarations_strategy(),
         ) {
             let hand = with_cards(&hand, &cards_of_rank(rank, copies));
@@ -280,9 +305,9 @@ mod tests {
         /// of the rank, not all four, and no accuso of it was declared.
         #[test]
         fn three_of_a_kind_is_allowed_when_four_is_not_held_and_the_rank_is_free(
-            rank in sample::select(DECLARABLE_RANKS.to_vec()),
+            rank in declarable_rank_strategy(),
             copies in 0..=Size::Four as usize,
-            hand in hand_strategy(),
+            hand in cards_strategy(),
             declared in declarations_strategy(),
         ) {
             let hand = with_cards(&hand, &cards_of_rank(rank, copies));
@@ -296,8 +321,8 @@ mod tests {
         #[test]
         fn a_hand_holding_the_set_can_declare_it(
             suit in suit_strategy(),
-            rank in sample::select(DECLARABLE_RANKS.to_vec()),
-            hand in hand_strategy(),
+            rank in declarable_rank_strategy(),
+            hand in cards_strategy(),
         ) {
             prop_assert!(Declaration::Napoli(suit).can_declare(&with_cards(&hand, &napoli_cards(suit))));
             let three = cards_of_rank(rank, Size::Three as usize);
@@ -313,7 +338,7 @@ mod tests {
         #[test]
         fn napoli_is_declarable_exactly_when_the_run_is_held(
             suit in suit_strategy(),
-            hand in hand_strategy(),
+            hand in cards_strategy(),
         ) {
             let held = napoli_cards(suit).iter().all(|card| hand.contains(card));
             prop_assert_eq!(Declaration::Napoli(suit).can_declare(&hand), held);
@@ -324,7 +349,7 @@ mod tests {
         #[test]
         fn three_of_a_kind_needs_three_cards_of_a_declarable_rank(
             rank in italian_rank_strategy(),
-            hand in hand_strategy(),
+            hand in cards_strategy(),
         ) {
             let expected = DECLARABLE_RANKS.contains(&rank)
                 && copies_of(&hand, rank) >= Size::Three as usize;
@@ -337,7 +362,7 @@ mod tests {
         #[test]
         fn four_of_a_kind_needs_four_cards_of_a_declarable_rank(
             rank in italian_rank_strategy(),
-            hand in hand_strategy(),
+            hand in cards_strategy(),
         ) {
             let expected = DECLARABLE_RANKS.contains(&rank)
                 && copies_of(&hand, rank) >= Size::Four as usize;
@@ -350,9 +375,9 @@ mod tests {
         #[test]
         fn adding_a_card_never_removes_a_declaration(
             suit in suit_strategy(),
-            rank in sample::select(DECLARABLE_RANKS.to_vec()),
-            hand in hand_strategy(),
-            extra in card_strategy(),
+            rank in declarable_rank_strategy(),
+            hand in cards_strategy(),
+            extra in tressette_card_strategy(),
         ) {
             let three = cards_of_rank(rank, Size::Three as usize);
             let four = cards_of_rank(rank, Size::Four as usize);

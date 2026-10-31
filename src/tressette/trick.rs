@@ -135,7 +135,10 @@ mod tests {
     use proptest::{prelude::*, sample};
 
     use super::*;
-    use crate::{cards::italian::ItalianRank, tressette::deck};
+    use crate::{
+        cards::italian::ItalianRank,
+        tressette::{deck, table::test_utils::seat_strategy},
+    };
 
     fn card(rank: ItalianRank, suit: Suit) -> TressetteCard {
         TressetteCard::new(rank, suit)
@@ -160,7 +163,7 @@ mod tests {
         /// and whatever is played, and the taker leads the next one.
         #[test]
         fn the_strongest_card_of_the_led_suit_takes(
-            leader in sample::select(Seat::ALL.to_vec()),
+            leader in seat_strategy(),
             cards in sample::subsequence(deck().into_iter().collect::<Vec<_>>(), 4).prop_shuffle(),
         ) {
             let mut trick = Trick::new(leader);
