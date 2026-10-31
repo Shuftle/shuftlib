@@ -75,8 +75,14 @@ impl Signals {
     }
 
     /// Returns whether `signal` is allowed.
-    pub fn allows(mut self, signal: Signal) -> bool {
-        *self.flag(signal)
+    pub fn allows(&self, signal: Signal) -> bool {
+        match signal {
+            Signal::Volo => self.volo,
+            Signal::Altra => self.altra,
+            Signal::Striscio => self.striscio,
+            Signal::Busso => self.busso,
+            Signal::Ribusso => self.ribusso,
+        }
     }
 
     /// Returns whether no signal is allowed: the game is played without them.

@@ -228,6 +228,17 @@ impl Hand {
         }
     }
 
+    /// Returns what a signal by `seat` is read against, under `rules`.
+    fn signal_context(&self, rules: signal::Signals, seat: Seat) -> signal::Context<'_> {
+        signal::Context {
+            rules,
+            hand: &self.cards[seat],
+            trick: self.trick,
+            signalled: self.signalled[seat],
+            led: self.led,
+        }
+    }
+
     /// Returns the 1-based number of the trick being played.
     fn current_trick(&self) -> usize {
         let taken: usize = Team::ALL.iter().map(|&team| self.taken[team].len()).sum();
@@ -600,14 +611,11 @@ impl Game for Tressette {
                 return Ok(events);
             }
             Action::Lead { card, signal } => {
-                let context = signal::Context {
-                    rules: self.config.signals,
-                    hand: &hand.cards[seat],
-                    trick: hand.trick,
-                    signalled: hand.signalled[seat],
-                    led: hand.led,
-                };
-                let lead = Lead::new(card, signal, &context)?;
+                let lead = Lead::new(
+                    card,
+                    signal,
+                    &hand.signal_context(self.config.signals, seat),
+                )?;
                 hand.signalled[seat][lead.card().suit()] = true;
                 (lead.play(), Some(lead))
             }
@@ -704,6 +712,9 @@ impl Game for Tressette {
 
     fn observe(&self, viewer: Viewer<Seat>) -> View {
         let hand = self.phase.hand();
+        let to_act = hand
+            .zip(viewer.seat())
+            .filter(|(hand, seat)| hand.trick.next_to_play() == *seat);
         View {
             viewer,
             status: self.status(),
@@ -718,24 +729,12 @@ impl Game for Tressette {
             }),
             score: self.score,
             dealer: self.dealer,
-            declarable: hand
-                .zip(viewer.seat())
-                .filter(|(hand, seat)| hand.trick.next_to_play() == *seat)
-                .map_or(Vec::new(), |(hand, seat)| {
-                    declaration::allowed(&hand.declaration_context(self.config.declarations, seat))
-                }),
-            leads: hand
-                .zip(viewer.seat())
-                .filter(|(hand, seat)| hand.trick.next_to_play() == *seat)
-                .map_or(Vec::new(), |(hand, seat)| {
-                    signal::allowed(&signal::Context {
-                        rules: self.config.signals,
-                        hand: &hand.cards[seat],
-                        trick: hand.trick,
-                        signalled: hand.signalled[seat],
-                        led: hand.led,
-                    })
-                }),
+            declarable: to_act.map_or(Vec::new(), |(hand, seat)| {
+                declaration::allowed(&hand.declaration_context(self.config.declarations, seat))
+            }),
+            leads: to_act.map_or(Vec::new(), |(hand, seat)| {
+                signal::allowed(&hand.signal_context(self.config.signals, seat))
+            }),
         }
     }
 }
@@ -744,11 +743,12 @@ impl Game for Tressette {
 /// Test utilities for the Tressette module.
 pub mod test_utils {
     use super::{
-        Config, HAND_SIZE, Seat, TressetteCard, deck,
+        Config, HAND_SIZE, Seat, TressetteCard,
+        card::test_utils::cards_of_size,
         declaration::{DeclarableRank, test_utils::rules_strategy},
     };
     use crate::cards::italian::Suit;
-    use proptest::{prelude::*, sample};
+    use proptest::prelude::*;
 
     /// The most actions a hand can take: every card played, and every seat
     /// making every declaration it can, a napoli per suit and an accuso per
@@ -770,8 +770,7 @@ pub mod test_utils {
 
     /// Generates a hand a seat could hold: 1 to [`HAND_SIZE`] distinct cards.
     pub fn hand_strategy() -> impl Strategy<Value = Vec<TressetteCard>> {
-        let all: Vec<_> = deck().into_iter().collect();
-        sample::subsequence(all, 1..=HAND_SIZE)
+        cards_of_size(1..=HAND_SIZE)
     }
 }
 
@@ -1344,9 +1343,9 @@ mod tests {
         assert_eq!(session.observe(seat).declarable(), expected);
     }
 
-    /// Checks that `seat` is offered exactly the signalled leads that
-    /// `Lead::new` accepts, given the suits it already `signalled` and the
-    /// suits already `led`.
+    /// Checks that `seat` is offered a signalled lead exactly when it leads the
+    /// trick with a signal that's allowed and true, given the suits it already
+    /// `signalled` and the suits already `led`.
     fn assert_signals_are_exact(
         session: &Session<Tressette>,
         config: Config,

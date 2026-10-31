@@ -107,7 +107,7 @@ impl Declaration {
 
 /// What a seat's declaration is read against.
 pub(super) struct Context<'a> {
-    /// The tricks on which the variant allows declarations.
+    /// The variant's declaration rules.
     pub rules: Declarations,
     /// The 1-based number of the trick being played.
     pub trick: usize,

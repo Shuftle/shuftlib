@@ -189,6 +189,8 @@ impl TressetteCard {
 #[cfg(test)]
 /// Test utilities for the Tressette card module.
 pub mod test_utils {
+    use std::ops::RangeInclusive;
+
     use super::TressetteCard;
     use crate::cards::italian::test_utils::italian_card_strategy;
     use crate::tressette::deck;
@@ -202,8 +204,13 @@ pub mod test_utils {
     /// Generates any set of distinct Tressette cards, from none to the whole
     /// deck.
     pub fn cards_strategy() -> impl Strategy<Value = Vec<TressetteCard>> {
-        let all: Vec<_> = deck().into_iter().collect();
-        let size = all.len();
-        sample::subsequence(all, 0..=size)
+        cards_of_size(0..=deck().len())
+    }
+
+    /// Generates any set of distinct Tressette cards whose size is in `sizes`.
+    pub fn cards_of_size(
+        sizes: RangeInclusive<usize>,
+    ) -> impl Strategy<Value = Vec<TressetteCard>> {
+        sample::subsequence(deck().into_iter().collect::<Vec<_>>(), sizes)
     }
 }
