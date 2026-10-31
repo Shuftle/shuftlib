@@ -632,22 +632,6 @@ mod tests {
             );
         }
 
-        /// A declaration can be proposed exactly on the tricks the rules
-        /// allow.
-        #[test]
-        fn a_declaration_is_proposed_exactly_inside_the_window(
-            rules in rules_strategy(),
-            trick in 0..=HAND_SIZE,
-            declaration in declaration_strategy(),
-        ) {
-            let expected = if rules.window.allows(trick) {
-                Ok(())
-            } else {
-                Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::WindowClosed })
-            };
-            prop_assert_eq!(InWindow::new(declaration, rules, trick).map(|_| ()), expected);
-        }
-
         /// A declaration in the window goes on exactly when the hand holds its
         /// cards.
         #[test]
@@ -723,6 +707,26 @@ mod tests {
                 Window::FirstThreeTricks.allows(trick),
                 (1..=LAST_TRICK_OF_FIRST_THREE).contains(&trick)
             );
+        }
+
+        /// A declaration is proposed exactly on the tricks its window covers:
+        /// trick 1 for the first trick, tricks 1 to 3 for the first three.
+        #[test]
+        fn a_declaration_is_proposed_exactly_inside_the_window(
+            rules in rules_strategy(),
+            trick in 0..=HAND_SIZE,
+            declaration in declaration_strategy(),
+        ) {
+            let open = match rules.window {
+                Window::FirstTrick => trick == 1,
+                Window::FirstThreeTricks => (1..=3).contains(&trick),
+            };
+            let expected = if open {
+                Ok(())
+            } else {
+                Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::WindowClosed })
+            };
+            prop_assert_eq!(InWindow::new(declaration, rules, trick).map(|_| ()), expected);
         }
     }
 }

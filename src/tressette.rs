@@ -269,7 +269,7 @@ impl Hand {
 /// Something a seat can do on its turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
-    /// Plays a card from the hand.
+    /// Plays a card from the hand, or leads with it without a signal.
     Play(TressetteCard),
     /// Declares an accuso or a napoli held in the hand, before playing. The
     /// seat keeps its turn.
@@ -394,7 +394,7 @@ pub enum Error {
         reason: DeclarationRefusal,
     },
     /// The signal can't be given with this lead.
-    #[error("{signal:?} can't be given: {reason}")]
+    #[error("{signal} can't be given: {reason}")]
     CannotSignal {
         /// The signal given.
         signal: Signal,

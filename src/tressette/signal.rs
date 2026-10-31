@@ -4,6 +4,11 @@
 //! Signals are never bluffs: a signal is only accepted when the leader's hand
 //! matches it.
 
+use std::{
+    fmt::{self, Display},
+    ops::{Index, IndexMut},
+};
+
 use crate::cards::italian::{ItalianRank, PerSuit};
 
 use super::{
@@ -24,8 +29,21 @@ pub enum Signal {
     /// Asks the leader's partner to play its best card of the suit.
     Busso,
     /// The leader keeps the Two of the suit and holds neither its Three nor
-    /// its Ace.
+    /// its Ace. Only the first lead of a suit in a hand may carry it.
     Ribusso,
+}
+
+impl Display for Signal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            Self::Volo => "volo",
+            Self::Altra => "altra",
+            Self::Striscio => "striscio",
+            Self::Busso => "busso",
+            Self::Ribusso => "ribusso",
+        };
+        f.write_str(name)
+    }
 }
 
 impl Signal {
@@ -39,16 +57,46 @@ impl Signal {
     ];
 }
 
+/// A value for each signal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+struct PerSignal<T> {
+    volo: T,
+    altra: T,
+    striscio: T,
+    busso: T,
+    ribusso: T,
+}
+
+impl<T> Index<Signal> for PerSignal<T> {
+    type Output = T;
+
+    fn index(&self, signal: Signal) -> &T {
+        match signal {
+            Signal::Volo => &self.volo,
+            Signal::Altra => &self.altra,
+            Signal::Striscio => &self.striscio,
+            Signal::Busso => &self.busso,
+            Signal::Ribusso => &self.ribusso,
+        }
+    }
+}
+
+impl<T> IndexMut<Signal> for PerSignal<T> {
+    fn index_mut(&mut self, signal: Signal) -> &mut T {
+        match signal {
+            Signal::Volo => &mut self.volo,
+            Signal::Altra => &mut self.altra,
+            Signal::Striscio => &mut self.striscio,
+            Signal::Busso => &mut self.busso,
+            Signal::Ribusso => &mut self.ribusso,
+        }
+    }
+}
+
 /// The signals a variant allows. The default allows none: the game is played
 /// without signals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct Signals {
-    volo: bool,
-    altra: bool,
-    striscio: bool,
-    busso: bool,
-    ribusso: bool,
-}
+pub struct Signals(PerSignal<bool>);
 
 impl Signals {
     /// Allows every signal.
@@ -72,36 +120,19 @@ impl Signals {
     pub fn only(signals: impl IntoIterator<Item = Signal>) -> Self {
         let mut allowed = Self::default();
         for signal in signals {
-            *allowed.flag(signal) = true;
+            allowed.0[signal] = true;
         }
         allowed
     }
 
     /// Returns whether `signal` is allowed.
     pub fn allows(&self, signal: Signal) -> bool {
-        match signal {
-            Signal::Volo => self.volo,
-            Signal::Altra => self.altra,
-            Signal::Striscio => self.striscio,
-            Signal::Busso => self.busso,
-            Signal::Ribusso => self.ribusso,
-        }
+        self.0[signal]
     }
 
     /// Returns whether no signal is allowed: the game is played without them.
     pub fn is_muto(self) -> bool {
         self == Self::default()
-    }
-
-    /// Returns the flag that says whether `signal` is allowed.
-    fn flag(&mut self, signal: Signal) -> &mut bool {
-        match signal {
-            Signal::Volo => &mut self.volo,
-            Signal::Altra => &mut self.altra,
-            Signal::Striscio => &mut self.striscio,
-            Signal::Busso => &mut self.busso,
-            Signal::Ribusso => &mut self.ribusso,
-        }
     }
 }
 
@@ -347,6 +378,22 @@ mod tests {
         super::lead(opening(lead, hand), signal, &fresh).is_ok()
     }
 
+    /// Without signals every signal is refused as muto, and with all of them
+    /// every signal is allowed.
+    #[test]
+    fn none_refuses_every_signal_and_all_allows_every_one() {
+        for signal in Signal::ALL {
+            assert_eq!(
+                AllowedSignal::new(signal, Signals::none()).map(|_| ()),
+                Err(Error::CannotSignal {
+                    signal,
+                    reason: SignalRefusal::Muto
+                })
+            );
+            assert!(AllowedSignal::new(signal, Signals::all()).is_ok());
+        }
+    }
+
     proptest! {
         /// Volo is true exactly when the leader holds no other card of the
         /// suit led.
@@ -411,18 +458,6 @@ mod tests {
                 && !hand.contains(&three)
                 && !hand.contains(&ace);
             prop_assert_eq!(matches(lead, &hand, Signal::Ribusso), expected);
-        }
-
-        /// `only` allows exactly the signals it's given, `all` every one, and
-        /// `none` none.
-        #[test]
-        fn only_allows_exactly_the_signals_given(allowed in signals_strategy()) {
-            let only = Signals::only(allowed.iter().copied());
-            for signal in Signal::ALL {
-                prop_assert_eq!(only.allows(signal), allowed.contains(&signal));
-                prop_assert!(Signals::all().allows(signal));
-                prop_assert!(!Signals::none().allows(signal));
-            }
         }
 
         /// A signal is allowed exactly when the rules list it; refused, it
