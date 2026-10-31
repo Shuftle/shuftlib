@@ -20,6 +20,9 @@ pub enum Signal {
     Striscio,
     /// Asks the leader's partner to play its best card of the suit.
     Busso,
+    /// The leader keeps the Two of the suit and holds neither its Three nor
+    /// its Ace.
+    Ribusso,
 }
 
 /// The card that opens a trick, with the signal given alongside it. It can
@@ -51,6 +54,11 @@ impl Lead {
             Signal::Altra => others == 1 && all_low,
             Signal::Striscio => others >= 2 && all_low,
             Signal::Busso => true,
+            Signal::Ribusso => {
+                let two = TressetteCard::new(ItalianRank::Two, card.suit());
+                let three = TressetteCard::new(ItalianRank::Three, card.suit());
+                card != two && hand.contains(&two) && !hand.contains(&three) && !hand.contains(&ace)
+            }
         };
         if matches {
             Ok(Self { card, signal })
@@ -121,6 +129,24 @@ mod tests {
         fn busso_is_always_true(hand in hand_strategy(), pick in any::<Index>()) {
             let lead = *pick.get(&hand);
             prop_assert!(Lead::parse(lead, Signal::Busso, &hand).is_ok());
+        }
+
+        /// Ribusso is true exactly when the leader keeps the Two of the suit led
+        /// and holds neither its Three nor its Ace, the lead included.
+        #[test]
+        fn ribusso_is_true_exactly_when_the_two_is_kept_without_the_three_or_the_ace(
+            hand in hand_strategy(),
+            pick in any::<Index>(),
+        ) {
+            let lead = *pick.get(&hand);
+            let two = TressetteCard::new(ItalianRank::Two, lead.suit());
+            let three = TressetteCard::new(ItalianRank::Three, lead.suit());
+            let ace = TressetteCard::new(ItalianRank::Ace, lead.suit());
+            let expected = lead != two
+                && hand.contains(&two)
+                && !hand.contains(&three)
+                && !hand.contains(&ace);
+            prop_assert_eq!(Lead::parse(lead, Signal::Ribusso, &hand).is_ok(), expected);
         }
     }
 }
