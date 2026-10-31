@@ -6,7 +6,7 @@
 
 use crate::cards::italian::ItalianRank;
 
-use super::{Error, TressetteCard};
+use super::{Error, TressetteCard, Trick};
 
 /// A signal the seat leading a trick may give with its card.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -88,6 +88,9 @@ pub enum SignalRefusal {
     /// The leader's hand doesn't match it.
     #[error("the hand doesn't match it")]
     HandDoesntMatch,
+    /// The seat isn't leading the trick: only the leader may signal.
+    #[error("only the seat leading the trick may signal")]
+    NotLeading,
 }
 
 /// What a leader's signal is read against.
@@ -96,6 +99,8 @@ pub(super) struct Context<'a> {
     pub rules: Rules,
     /// The leader's cards before it leads.
     pub hand: &'a [TressetteCard],
+    /// The trick the signal would be given on.
+    pub trick: Trick,
 }
 
 /// The card that opens a trick, with the signal given alongside it. It can
@@ -115,6 +120,12 @@ impl Lead {
         signal: Signal,
         context: &Context,
     ) -> Result<Self, Error> {
+        if context.trick.led_suit().is_some() {
+            return Err(Error::CannotSignal {
+                signal,
+                reason: SignalRefusal::NotLeading,
+            });
+        }
         if !context.rules.allows(signal) {
             let reason = if context.rules.is_muto() {
                 SignalRefusal::Muto
@@ -151,12 +162,32 @@ impl Lead {
             })
         }
     }
+
+    /// Returns the card led.
+    pub fn card(&self) -> TressetteCard {
+        self.card
+    }
+
+    /// Returns the signal given.
+    pub fn signal(&self) -> Signal {
+        self.signal
+    }
+}
+
+/// Returns every lead with a signal the leader may make in `context`.
+pub(super) fn allowed(context: &Context) -> Vec<Lead> {
+    context
+        .hand
+        .iter()
+        .flat_map(|&card| Signal::ALL.map(|signal| (card, signal)))
+        .filter_map(|(card, signal)| Lead::parse(card, signal, context).ok())
+        .collect()
 }
 
 #[cfg(test)]
 /// Test utilities for the signal module.
 pub mod test_utils {
-    use super::Signal;
+    use super::{Rules, Signal};
     use proptest::{prelude::*, sample};
 
     /// Generates any signal.
@@ -168,6 +199,12 @@ pub mod test_utils {
     pub fn signals_strategy() -> impl Strategy<Value = Vec<Signal>> {
         sample::subsequence(Signal::ALL.to_vec(), 0..=Signal::ALL.len())
     }
+
+    /// Generates any signal rules, from none allowed to all of them.
+    pub fn rules_strategy() -> impl Strategy<Value = Rules> {
+        signals_strategy()
+            .prop_map(|allowed| allowed.into_iter().fold(Rules::default(), Rules::allow))
+    }
 }
 
 #[cfg(test)]
@@ -177,7 +214,10 @@ mod tests {
         *,
     };
     use crate::cards::italian::ItalianRank;
-    use crate::tressette::test_utils::hand_strategy;
+    use crate::tressette::{
+        Seat, card::test_utils::tressette_card_strategy, table::test_utils::seat_strategy,
+        test_utils::hand_strategy,
+    };
     use proptest::{prelude::*, sample::Index};
 
     /// Returns the cards of `hand` in `lead`'s suit, other than `lead`.
@@ -193,6 +233,7 @@ mod tests {
         Context {
             rules: Signal::ALL.into_iter().fold(Rules::default(), Rules::allow),
             hand,
+            trick: Trick::new(Seat::North),
         }
     }
 
@@ -285,8 +326,37 @@ mod tests {
             } else {
                 refused(SignalRefusal::HandDoesntMatch)
             };
-            let context = Context { rules, hand: &hand };
+            let context = Context {
+                rules,
+                hand: &hand,
+                trick: Trick::new(Seat::North),
+            };
             prop_assert_eq!(Lead::parse(lead, signal, &context).map(|_| ()), expected);
+        }
+
+        /// Once a card is on the trick, no signal can be given, whatever the
+        /// rules and the hand.
+        #[test]
+        fn only_the_leader_signals(
+            hand in hand_strategy(),
+            pick in any::<Index>(),
+            signal in signal_strategy(),
+            allowed in signals_strategy(),
+            leader in seat_strategy(),
+            played in tressette_card_strategy(),
+        ) {
+            let lead = *pick.get(&hand);
+            let mut trick = Trick::new(leader);
+            trick.play(played);
+            let context = Context {
+                rules: allowed.into_iter().fold(Rules::default(), Rules::allow),
+                hand: &hand,
+                trick,
+            };
+            prop_assert_eq!(
+                Lead::parse(lead, signal, &context).map(|_| ()),
+                Err(Error::CannotSignal { signal, reason: SignalRefusal::NotLeading })
+            );
         }
     }
 }

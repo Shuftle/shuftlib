@@ -80,7 +80,7 @@ mod trick;
 
 pub use card::TressetteCard;
 use declaration::{Declaration, DeclarationRefusal, Declared};
-use signal::{Signal, SignalRefusal};
+use signal::{Lead, Signal, SignalRefusal};
 pub use table::{PerSeat, PerTeam, Seat, Team};
 pub use trick::{CompletedTrick, Trick};
 
@@ -97,6 +97,8 @@ const TRICK_POINTS_FOR_DECLARATIONS: u8 = 1;
 pub struct Config {
     /// When declarations may be made, and what other seats learn from them.
     pub declarations: declaration::Rules,
+    /// The signals a seat leading a trick may give.
+    pub signals: signal::Rules,
 }
 
 /// The number of cards each seat is dealt.
@@ -254,6 +256,13 @@ pub enum Action {
     /// Declares an accuso or a napoli held in the hand, before playing. The
     /// seat keeps its turn.
     Declare(Declaration),
+    /// Leads a trick with a card from the hand, giving a signal with it.
+    Lead {
+        /// The card led.
+        card: TressetteCard,
+        /// The signal given.
+        signal: Signal,
+    },
 }
 
 /// Something that happened in the game.
@@ -390,6 +399,7 @@ pub struct View {
     score: PerTeam<u8>,
     dealer: Option<Seat>,
     declarable: Vec<Declaration>,
+    leads: Vec<Lead>,
 }
 
 impl View {
@@ -470,6 +480,10 @@ impl Observation for View {
             .into_iter()
             .map(Action::Play)
             .chain(self.declarable.iter().copied().map(Action::Declare))
+            .chain(self.leads.iter().map(|lead| Action::Lead {
+                card: lead.card(),
+                signal: lead.signal(),
+            }))
             .collect()
     }
 }
@@ -584,6 +598,14 @@ impl Game for Tressette {
                 });
                 return Ok(events);
             }
+            Action::Lead { card, signal } => {
+                let context = signal::Context {
+                    rules: self.config.signals,
+                    hand: &hand.cards[seat],
+                    trick: hand.trick,
+                };
+                Lead::parse(card, signal, &context)?.card()
+            }
         };
         let held = &mut hand.cards[seat];
         let Some(position) = held.iter().position(|&held| held == card) else {
@@ -688,6 +710,16 @@ impl Game for Tressette {
                 .map_or(Vec::new(), |(hand, seat)| {
                     declaration::allowed(&hand.declaration_context(self.config.declarations, seat))
                 }),
+            leads: hand
+                .zip(viewer.seat())
+                .filter(|(hand, seat)| hand.trick.next_to_play() == *seat)
+                .map_or(Vec::new(), |(hand, seat)| {
+                    signal::allowed(&signal::Context {
+                        rules: self.config.signals,
+                        hand: &hand.cards[seat],
+                        trick: hand.trick,
+                    })
+                }),
         }
     }
 }
@@ -700,7 +732,14 @@ pub mod test_utils {
 
     /// Generates any game configuration.
     pub fn config_strategy() -> impl Strategy<Value = Config> {
-        rules_strategy().prop_map(|declarations| Config { declarations })
+        (
+            rules_strategy(),
+            super::signal::test_utils::rules_strategy(),
+        )
+            .prop_map(|(declarations, signals)| Config {
+                declarations,
+                signals,
+            })
     }
 
     /// Generates a hand a seat could hold: 1 to [`HAND_SIZE`] distinct cards.
@@ -1221,10 +1260,16 @@ mod tests {
     /// accepts, and that rejected ones leave it unchanged.
     fn assert_legality_is_exact(session: &Session<Tressette>, seat: Seat) {
         let legal = session.observe(seat).legal_actions();
+        let leads = deck().into_iter().flat_map(|card| {
+            Signal::ALL
+                .into_iter()
+                .map(move |signal| Action::Lead { card, signal })
+        });
         let actions = deck()
             .into_iter()
             .map(Action::Play)
-            .chain(Declaration::all().map(Action::Declare));
+            .chain(Declaration::all().map(Action::Declare))
+            .chain(leads);
         for action in actions {
             let mut attempt = session.clone();
             match attempt.act(seat, action) {
@@ -1254,6 +1299,32 @@ mod tests {
             declared: &hand.declared[seat],
         });
         assert_eq!(session.observe(seat).declarable(), expected);
+    }
+
+    /// Checks that `seat` is offered a signalled lead exactly when it leads
+    /// the trick, for every card and signal the rules and its hand allow.
+    fn assert_signals_are_exact(session: &Session<Tressette>, config: Config, seat: Seat) {
+        let hand = session.game().phase.hand().unwrap();
+        let held = &hand.cards[seat];
+        let context = signal::Context {
+            rules: config.signals,
+            hand: held,
+            trick: hand.trick,
+        };
+        let leading = hand.trick.led_suit().is_none();
+        let expected: HashSet<_> = held
+            .iter()
+            .flat_map(|&card| Signal::ALL.map(|signal| (card, signal)))
+            .filter(|&(card, signal)| leading && Lead::parse(card, signal, &context).is_ok())
+            .map(|(card, signal)| Action::Lead { card, signal })
+            .collect();
+        let offered: HashSet<_> = session
+            .observe(seat)
+            .legal_actions()
+            .into_iter()
+            .filter(|action| matches!(action, Action::Lead { .. }))
+            .collect();
+        assert_eq!(offered, expected);
     }
 
     /// Checks that declaring `declaration` told everyone its points, and
@@ -1312,6 +1383,7 @@ mod tests {
                     };
                     assert_legality_is_exact(&session, seat);
                     assert_declarable_is_exact(&session, config, seat);
+                    assert_signals_are_exact(&session, config, seat);
                     if choices.random_ratio(1, 500) {
                         let quitter = Seat::ALL[choices.random_range(0..Seat::ALL.len())];
                         session.forfeit(quitter).unwrap()
