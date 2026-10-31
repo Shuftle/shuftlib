@@ -691,12 +691,18 @@ impl Game for Tressette {
 #[cfg(test)]
 /// Test utilities for the Tressette module.
 pub mod test_utils {
-    use super::{Config, declaration::test_utils::rules_strategy};
-    use proptest::prelude::*;
+    use super::{Config, HAND_SIZE, TressetteCard, deck, declaration::test_utils::rules_strategy};
+    use proptest::{prelude::*, sample};
 
     /// Generates any game configuration.
     pub fn config_strategy() -> impl Strategy<Value = Config> {
         rules_strategy().prop_map(|declarations| Config { declarations })
+    }
+
+    /// Generates a hand a seat could hold: 1 to [`HAND_SIZE`] distinct cards.
+    pub fn hand_strategy() -> impl Strategy<Value = Vec<TressetteCard>> {
+        let all: Vec<_> = deck().into_iter().collect();
+        sample::subsequence(all, 1..=HAND_SIZE)
     }
 }
 

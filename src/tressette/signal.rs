@@ -4,6 +4,8 @@
 //! Signals are never bluffs: a [`Lead`] only exists when the leader's hand
 //! matches its signal.
 
+use crate::cards::italian::ItalianRank;
+
 use super::{Error, TressetteCard};
 
 /// A signal the seat leading a trick may give with its card.
@@ -11,10 +13,13 @@ use super::{Error, TressetteCard};
 pub enum Signal {
     /// The card led is the leader's last of its suit.
     Volo,
+    /// The leader holds exactly one other card of the suit, King or lower.
+    Altra,
 }
 
-/// A card led with a signal the leader's hand matches. Only [`Lead::parse`]
-/// makes one, so holding one means the signal is honest.
+/// The card that opens a trick, with the signal given alongside it. It can
+/// only be built from a hand that matches the signal, so every `Lead` is
+/// honest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Lead {
     card: TressetteCard,
@@ -22,15 +27,25 @@ pub struct Lead {
 }
 
 impl Lead {
-    /// Reads `signal` on `card` against `rest`, the cards the leader holds
-    /// besides it, or says why the signal is false.
+    /// Reads `signal` on `card` against `hand`, the leader's cards before it
+    /// leads, or says why the signal is false.
     pub(super) fn parse(
         card: TressetteCard,
         signal: Signal,
-        rest: &[TressetteCard],
+        hand: &[TressetteCard],
     ) -> Result<Self, Error> {
+        let mut same_suit = hand
+            .iter()
+            .filter(|held| held.suit() == card.suit() && **held != card);
         let matches = match signal {
-            Signal::Volo => rest.iter().all(|held| held.suit() != card.suit()),
+            Signal::Volo => same_suit.next().is_none(),
+            Signal::Altra => {
+                let ace = TressetteCard::new(ItalianRank::Ace, card.suit());
+                matches!(
+                    (same_suit.next(), same_suit.next()),
+                    (Some(other), None) if *other < ace
+                )
+            }
         };
         if matches {
             Ok(Self { card, signal })
@@ -44,28 +59,15 @@ impl Lead {
 mod tests {
     use super::*;
     use crate::cards::italian::ItalianRank;
-    use crate::tressette::{
-        card::test_utils::{cards_strategy, tressette_card_strategy},
-        deck,
-    };
-    use proptest::prelude::*;
+    use crate::tressette::test_utils::hand_strategy;
+    use proptest::{prelude::*, sample::Index};
 
-    /// Returns `same_suit` cards of `lead`'s suit other than `lead`, and the
-    /// cards of `other_suits` not of that suit.
-    fn hand(
-        lead: TressetteCard,
-        same_suit: usize,
-        other_suits: &[TressetteCard],
-    ) -> Vec<TressetteCard> {
-        let suit = deck()
-            .into_iter()
-            .filter(|card| card.suit() == lead.suit() && *card != lead)
-            .take(same_suit);
-        let others = other_suits
-            .iter()
+    /// Returns the cards of `hand` in `lead`'s suit, other than `lead`.
+    fn same_suit(hand: &[TressetteCard], lead: TressetteCard) -> Vec<TressetteCard> {
+        hand.iter()
             .copied()
-            .filter(|card| card.suit() != lead.suit());
-        suit.chain(others).collect()
+            .filter(|card| card.suit() == lead.suit() && *card != lead)
+            .collect()
     }
 
     proptest! {
@@ -73,12 +75,26 @@ mod tests {
         /// suit led.
         #[test]
         fn volo_is_true_exactly_when_the_card_is_the_last_of_its_suit(
-            lead in tressette_card_strategy(),
-            same_suit in 0..ItalianRank::ALL.len(),
-            other_suits in cards_strategy(),
+            hand in hand_strategy(),
+            pick in any::<Index>(),
         ) {
-            let rest = hand(lead, same_suit, &other_suits);
-            prop_assert_eq!(Lead::parse(lead, Signal::Volo, &rest).is_ok(), same_suit == 0);
+            let lead = *pick.get(&hand);
+            let expected = same_suit(&hand, lead).is_empty();
+            prop_assert_eq!(Lead::parse(lead, Signal::Volo, &hand).is_ok(), expected);
+        }
+
+        /// Altra is true exactly when the leader holds one other card of the
+        /// suit led, and it's King or lower.
+        #[test]
+        fn altra_is_true_exactly_when_one_low_card_of_the_suit_is_left(
+            hand in hand_strategy(),
+            pick in any::<Index>(),
+        ) {
+            let lead = *pick.get(&hand);
+            let same_suit = same_suit(&hand, lead);
+            let ace = TressetteCard::new(ItalianRank::Ace, lead.suit());
+            let expected = same_suit.len() == 1 && same_suit[0] < ace;
+            prop_assert_eq!(Lead::parse(lead, Signal::Altra, &hand).is_ok(), expected);
         }
     }
 }
