@@ -6,7 +6,7 @@
 
 use crate::cards::italian::ItalianRank;
 
-use super::{Error, TressetteCard, Trick};
+use super::{Error, TressetteCard, Trick, trick::Play};
 
 /// A signal the seat leading a trick may give with its card.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -108,7 +108,7 @@ pub(super) struct Context<'a> {
 /// honest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Lead {
-    card: TressetteCard,
+    play: Play,
     signal: Signal,
 }
 
@@ -134,6 +134,7 @@ impl Lead {
             };
             return Err(Error::CannotSignal { signal, reason });
         }
+        let play = Play::new(card, context.hand, &context.trick)?;
         let hand = context.hand;
         let ace = TressetteCard::new(ItalianRank::Ace, card.suit());
         let (others, all_low) = hand
@@ -154,7 +155,7 @@ impl Lead {
             }
         };
         if matches {
-            Ok(Self { card, signal })
+            Ok(Self { play, signal })
         } else {
             Err(Error::CannotSignal {
                 signal,
@@ -165,7 +166,12 @@ impl Lead {
 
     /// Returns the card led.
     pub fn card(&self) -> TressetteCard {
-        self.card
+        self.play.card()
+    }
+
+    /// Returns the card led, as a legal play.
+    pub(crate) fn play(&self) -> Play {
+        self.play
     }
 
     /// Returns the signal given.

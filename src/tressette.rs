@@ -82,6 +82,7 @@ pub use card::TressetteCard;
 use declaration::{Declaration, DeclarationRefusal, Declared};
 use signal::{Lead, Signal, SignalRefusal};
 pub use table::{PerSeat, PerTeam, Seat, Team};
+use trick::Play;
 pub use trick::{CompletedTrick, Trick};
 
 /// The score a team needs to win, provided it's ahead.
@@ -450,9 +451,12 @@ impl View {
     /// that seat's turn, and for a spectator.
     pub fn legal_cards(&self) -> Vec<TressetteCard> {
         match (&self.trick, self.viewer.seat()) {
-            (Some(trick), Some(seat)) if self.status.to_act().contains(&seat) => {
-                playable(&self.hand, trick.led_suit())
-            }
+            (Some(trick), Some(seat)) if self.status.to_act().contains(&seat) => self
+                .hand
+                .iter()
+                .copied()
+                .filter(|&card| Play::new(card, &self.hand, trick).is_ok())
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -485,24 +489,6 @@ impl Observation for View {
                 signal: lead.signal(),
             }))
             .collect()
-    }
-}
-
-/// Returns the suit `hand` must play: the led suit, if the hand has any card
-/// of it.
-fn suit_to_follow(hand: &[TressetteCard], led: Option<Suit>) -> Option<Suit> {
-    led.filter(|&suit| hand.iter().any(|card| card.suit() == suit))
-}
-
-/// Returns the cards of `hand` that may be played on a trick led by `led`.
-fn playable(hand: &[TressetteCard], led: Option<Suit>) -> Vec<TressetteCard> {
-    match suit_to_follow(hand, led) {
-        Some(suit) => hand
-            .iter()
-            .copied()
-            .filter(|card| card.suit() == suit)
-            .collect(),
-        None => hand.to_vec(),
     }
 }
 
@@ -583,8 +569,8 @@ impl Game for Tressette {
             return Err(Error::NoHandInProgress);
         };
         let seat = turn.seat();
-        let card = match action {
-            Action::Play(card) => card,
+        let play = match action {
+            Action::Play(card) => Play::new(card, &hand.cards[seat], &hand.trick)?,
             Action::Declare(declaration) => {
                 let rules = self.config.declarations;
                 let made = Declared::new(declaration, &hand.declaration_context(rules, seat))?;
@@ -604,20 +590,11 @@ impl Game for Tressette {
                     hand: &hand.cards[seat],
                     trick: hand.trick,
                 };
-                Lead::new(card, signal, &context)?.card()
+                Lead::new(card, signal, &context)?.play()
             }
         };
-        let held = &mut hand.cards[seat];
-        let Some(position) = held.iter().position(|&held| held == card) else {
-            return Err(Error::CardNotInHand { card });
-        };
-        if let Some(required) =
-            suit_to_follow(held, hand.trick.led_suit()).filter(|&suit| card.suit() != suit)
-        {
-            return Err(Error::MustFollowSuit { card, required });
-        }
-
-        held.remove(position);
+        let card = play.card();
+        hand.cards[seat].retain(|&held| held != card);
         let mut events = Events::new();
         events.public(Event::CardPlayed { seat, card });
         if let Some(trick) = hand.trick.play(card) {

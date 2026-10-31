@@ -154,6 +154,11 @@ impl Play {
         }
         Ok(Self(card))
     }
+
+    /// Returns the card played.
+    pub(crate) fn card(self) -> TressetteCard {
+        self.0
+    }
 }
 
 #[cfg(test)]
