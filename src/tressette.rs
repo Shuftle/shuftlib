@@ -294,6 +294,15 @@ pub enum Event {
         /// The card played.
         card: TressetteCard,
     },
+    /// A seat led the trick with a card, giving a signal with it.
+    Led {
+        /// The seat that led.
+        seat: Seat,
+        /// The card led.
+        card: TressetteCard,
+        /// The signal given.
+        signal: Signal,
+    },
     /// A seat made a declaration.
     Declared {
         /// The seat that declared.
@@ -576,8 +585,8 @@ impl Game for Tressette {
             return Err(Error::NoHandInProgress);
         };
         let seat = turn.seat();
-        let play = match action {
-            Action::Play(card) => Play::new(card, &hand.cards[seat], &hand.trick)?,
+        let (play, lead) = match action {
+            Action::Play(card) => (Play::new(card, &hand.cards[seat], &hand.trick)?, None),
             Action::Declare(declaration) => {
                 let rules = self.config.declarations;
                 let made = Declared::new(declaration, &hand.declaration_context(rules, seat))?;
@@ -601,7 +610,7 @@ impl Game for Tressette {
                 };
                 let lead = Lead::new(card, signal, &context)?;
                 hand.signalled[seat][lead.card().suit()] = true;
-                lead.play()
+                (lead.play(), Some(lead))
             }
         };
         let card = play.card();
@@ -610,8 +619,21 @@ impl Game for Tressette {
         }
         hand.cards[seat].retain(|&held| held != card);
         let mut events = Events::new();
-        events.public(Event::CardPlayed { seat, card });
-        if let Some(trick) = hand.trick.play(card) {
+        let completed = match lead {
+            Some(lead) => {
+                events.public(Event::Led {
+                    seat,
+                    card,
+                    signal: lead.signal(),
+                });
+                hand.trick.lead(lead)
+            }
+            None => {
+                events.public(Event::CardPlayed { seat, card });
+                hand.trick.play(card)
+            }
+        };
+        if let Some(trick) = completed {
             hand.taken[trick.taker().team()].extend(trick.cards());
             hand.last_trick = Some(trick);
             events.public(Event::TrickTaken { trick });
@@ -1185,6 +1207,7 @@ mod tests {
         hand: Vec<TressetteCard>,
         hand_sizes: PerSeat<usize>,
         trick: Vec<(Seat, TressetteCard)>,
+        signal: Option<Signal>,
         last_trick: Option<CompletedTrick>,
         tricks_taken: PerTeam<usize>,
         score: PerTeam<u8>,
@@ -1203,17 +1226,25 @@ mod tests {
                     };
                 }
                 Event::CardsReceived { cards } => self.hand.clone_from(cards),
-                Event::CardPlayed { seat: player, card } => {
+                Event::CardPlayed { seat: player, card }
+                | Event::Led {
+                    seat: player, card, ..
+                } => {
                     if Some(*player) == viewer {
                         let position = self.hand.iter().position(|held| held == card).unwrap();
                         self.hand.remove(position);
                     }
                     self.hand_sizes[*player] -= 1;
                     self.trick.push((*player, *card));
+                    if let Event::Led { signal, .. } = event {
+                        self.signal = Some(*signal);
+                    }
                 }
                 Event::TrickTaken { trick } => {
                     assert_eq!(trick.plays().collect::<Vec<_>>(), self.trick);
+                    assert_eq!(trick.signal(), self.signal);
                     self.trick.clear();
+                    self.signal = None;
                     self.tricks_taken[trick.taker().team()] += 1;
                     self.last_trick = Some(*trick);
                 }
@@ -1247,6 +1278,7 @@ mod tests {
                 .trick()
                 .map_or(Vec::new(), |trick| trick.plays().collect());
             assert_eq!(trick, self.trick);
+            assert_eq!(view.trick().and_then(Trick::signal), self.signal);
         }
     }
 
@@ -1349,6 +1381,22 @@ mod tests {
         assert_eq!(offered, expected);
     }
 
+    /// Checks that `action` by `seat` told everyone which card was played in
+    /// a single event, with its signal when it led with one.
+    fn assert_card_event(seat: Seat, action: Action, update: &UpdateOf<Tressette>) {
+        let cards: Vec<_> = update
+            .public_only()
+            .filter(|event| matches!(event, Event::CardPlayed { .. } | Event::Led { .. }))
+            .collect();
+        match action {
+            Action::Play(card) => assert_eq!(cards, [&Event::CardPlayed { seat, card }]),
+            Action::Lead { card, signal } => {
+                assert_eq!(cards, [&Event::Led { seat, card, signal }]);
+            }
+            Action::Declare(_) => assert!(cards.is_empty()),
+        }
+    }
+
     /// Checks that declaring `declaration` told everyone its points, and
     /// which one it was only when `config` says so, and that `seat` kept the
     /// turn.
@@ -1430,6 +1478,7 @@ mod tests {
                         if let Action::Lead { card, .. } = action {
                             signalled[seat][card.suit()] = true;
                         }
+                        assert_card_event(seat, action, &update);
                         if let Action::Declare(declaration) = action {
                             assert_declared(&session, config, seat, declaration, &update);
                         }

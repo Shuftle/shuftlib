@@ -2,7 +2,10 @@
 
 use crate::cards::italian::Suit;
 
-use super::{Error, Seat, TressetteCard};
+use super::{
+    Error, Seat, TressetteCard,
+    signal::{Lead, Signal},
+};
 
 /// The trick being played: who led it, and the cards played so far.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -12,6 +15,8 @@ pub struct Trick {
     /// yet to play. There's no room for the last card: a trick is replaced
     /// by the next one as soon as it's played.
     cards: [Option<TressetteCard>; 3],
+    /// The signal given with the lead, if any.
+    signal: Option<Signal>,
 }
 
 /// A trick whose four cards have been played.
@@ -21,6 +26,8 @@ pub struct CompletedTrick {
     /// In play order, starting from the leader.
     cards: [TressetteCard; 4],
     taker: Seat,
+    /// The signal given with the lead, if any.
+    signal: Option<Signal>,
 }
 
 impl Trick {
@@ -28,7 +35,14 @@ impl Trick {
         Self {
             leader,
             cards: [None; 3],
+            signal: None,
         }
+    }
+
+    /// Leads the trick with `lead`'s card, giving its signal.
+    pub(super) fn lead(&mut self, lead: Lead) -> Option<CompletedTrick> {
+        self.signal = Some(lead.signal());
+        self.play(lead.card())
     }
 
     /// Returns the seat that led, or will lead, the trick.
@@ -45,6 +59,11 @@ impl Trick {
     /// Returns the suit of the card that led the trick, if any was played.
     pub fn led_suit(&self) -> Option<Suit> {
         self.cards[0].map(|card| card.suit())
+    }
+
+    /// Returns the signal given with the lead, if any.
+    pub fn signal(&self) -> Option<Signal> {
+        self.signal
     }
 
     /// Returns the seat whose turn it is.
@@ -86,11 +105,13 @@ impl Trick {
                 best
             }
         });
+        let signal = self.signal;
         *self = Self::new(taker);
         CompletedTrick {
             leader,
             cards,
             taker,
+            signal,
         }
     }
 }
@@ -105,6 +126,11 @@ impl CompletedTrick {
     /// strongest card of the led suit.
     pub fn taker(&self) -> Seat {
         self.taker
+    }
+
+    /// Returns the signal given with the lead, if any.
+    pub fn signal(&self) -> Option<Signal> {
+        self.signal
     }
 
     /// Returns each card with the seat that played it, in play order.
