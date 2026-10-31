@@ -104,7 +104,7 @@ impl Display for Suit {
 
 /// A value for each suit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct PerSuit<T> {
+pub(crate) struct PerSuit<T> {
     /// The value for Coins.
     pub coins: T,
     /// The value for Cups.
@@ -113,19 +113,6 @@ pub struct PerSuit<T> {
     pub swords: T,
     /// The value for Clubs.
     pub clubs: T,
-}
-
-impl<T> PerSuit<T> {
-    /// Builds the values by calling `value` for each [`Suit`], in deck order,
-    /// as in [`Suit::ALL`].
-    pub fn from_fn(mut value: impl FnMut(Suit) -> T) -> Self {
-        Self {
-            coins: value(Suit::Coins),
-            cups: value(Suit::Cups),
-            swords: value(Suit::Swords),
-            clubs: value(Suit::Clubs),
-        }
-    }
 }
 
 impl<T> Index<Suit> for PerSuit<T> {
@@ -238,7 +225,9 @@ pub mod test_utils {
     }
 
     /// Generates a value for each suit, each drawn from `value`.
-    pub fn per_suit_strategy<S: Strategy>(value: S) -> impl Strategy<Value = PerSuit<S::Value>> {
+    pub(crate) fn per_suit_strategy<S: Strategy>(
+        value: S,
+    ) -> impl Strategy<Value = PerSuit<S::Value>> {
         uniform4(value).prop_map(|[coins, cups, swords, clubs]| PerSuit {
             coins,
             cups,
@@ -252,19 +241,7 @@ pub mod test_utils {
 mod tests {
     use std::collections::HashSet;
 
-    use super::{PerSuit, Suit};
     use crate::cards::deck::Deck;
-
-    #[test]
-    fn values_for_each_suit_are_built_in_deck_order() {
-        let mut visited = Vec::new();
-        let built = PerSuit::from_fn(|suit| {
-            visited.push(suit);
-            visited.len()
-        });
-        assert_eq!(visited, Suit::ALL);
-        assert_eq!(built[Suit::Swords], 3);
-    }
 
     #[test]
     fn the_deck_has_forty_distinct_cards_with_distinct_names() {

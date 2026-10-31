@@ -4,7 +4,7 @@ use crate::cards::italian::Suit;
 
 use super::{
     Error, Seat, TressetteCard,
-    signal::{Lead, Signal},
+    signal::{self, Signal},
 };
 
 /// The trick being played: who led it, and the cards played so far.
@@ -39,10 +39,26 @@ impl Trick {
         }
     }
 
-    /// Leads the trick with `lead`'s card, giving its signal.
-    pub(super) fn lead(&mut self, lead: Lead) -> Option<CompletedTrick> {
+    /// Plays `held` for [`next_to_play`](Self::next_to_play), or returns that
+    /// it must follow the led suit. If that completes the trick, returns it
+    /// and starts the next one, led by the taker.
+    pub(super) fn follow(&mut self, held: Held<'_>) -> Result<Option<CompletedTrick>, Error> {
+        let play = held.follow(self)?;
+        Ok(self.play(play))
+    }
+
+    /// Leads the trick with `held`, giving `signal`, or returns why the lead
+    /// or the signal isn't allowed in `context`.
+    pub(super) fn lead(
+        &mut self,
+        held: Held<'_>,
+        signal: Signal,
+        context: &signal::Context,
+    ) -> Result<(), Error> {
+        let lead = signal::lead(held.open(self)?, signal, context)?;
+        self.cards[0] = Some(lead.card());
         self.signal = Some(lead.signal());
-        self.play(lead.play())
+        Ok(())
     }
 
     /// Returns the seat that led, or will lead, the trick.
@@ -79,7 +95,7 @@ impl Trick {
     /// Plays `play` for [`next_to_play`](Self::next_to_play). If that
     /// completes the trick, returns it and starts the next one, led by the
     /// taker.
-    pub(super) fn play(&mut self, play: Play) -> Option<CompletedTrick> {
+    fn play(&mut self, play: Play) -> Option<CompletedTrick> {
         let card = play.card();
         match self.cards {
             [None, _, _] => self.cards[0] = Some(card),

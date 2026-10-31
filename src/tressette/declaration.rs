@@ -114,7 +114,7 @@ impl Declaration {
     }
 
     /// Returns whether `hand` holds every card this declaration needs.
-    pub fn can_declare(&self, hand: &[TressetteCard]) -> bool {
+    pub fn is_held_in(&self, hand: &[TressetteCard]) -> bool {
         match *self {
             Self::Napoli(suit) => NAPOLI_RANKS
                 .iter()
@@ -169,7 +169,7 @@ impl InWindow {
     /// Checks the declaration against `hand`, or returns that the hand
     /// doesn't hold its cards.
     pub(crate) fn held(self, hand: &[TressetteCard]) -> Result<HeldDeclaration<'_>, Error> {
-        if self.0.can_declare(hand) {
+        if self.0.is_held_in(hand) {
             Ok(HeldDeclaration {
                 declaration: self.0,
                 hand,
@@ -226,7 +226,7 @@ impl Unmade<'_> {
                 rank,
                 size: Size::Four,
             })
-            .can_declare(hand)
+            .is_held_in(hand)
         {
             return Err(refused(declaration, DeclarationRefusal::ReplacedByFour));
         }
@@ -494,7 +494,7 @@ mod tests {
         ) {
             let hand = if held { with_cards(&hand, &napoli_cards(suit)) } else { hand };
             let napoli = Declaration::Napoli(suit);
-            let expected = napoli.can_declare(&hand) && !declared.contains(&napoli);
+            let expected = napoli.is_held_in(&hand) && !declared.contains(&napoli);
             prop_assert_eq!(allowed_on_first_trick(&hand, &declared).contains(&napoli), expected);
         }
 
@@ -530,20 +530,20 @@ mod tests {
             prop_assert_eq!(allowed_on_first_trick(&hand, &declared).contains(&three), expected);
         }
 
-        /// Any hand that holds a set can declare it, whatever else it holds.
+        /// A set is held in any hand that holds its cards, whatever else it holds.
         #[test]
-        fn a_hand_holding_the_set_can_declare_it(
+        fn a_set_is_held_in_any_hand_holding_its_cards(
             suit in suit_strategy(),
             rank in declarable_rank_strategy(),
             hand in cards_strategy(),
         ) {
-            prop_assert!(Declaration::Napoli(suit).can_declare(&with_cards(&hand, &napoli_cards(suit))));
+            prop_assert!(Declaration::Napoli(suit).is_held_in(&with_cards(&hand, &napoli_cards(suit))));
             let three = cards_of_rank(rank, Size::Three as usize);
             let declaration = Declaration::Accuso { rank, size: Size::Three };
-            prop_assert!(declaration.can_declare(&with_cards(&hand, &three)));
+            prop_assert!(declaration.is_held_in(&with_cards(&hand, &three)));
             let four = cards_of_rank(rank, Size::Four as usize);
             let declaration = Declaration::Accuso { rank, size: Size::Four };
-            prop_assert!(declaration.can_declare(&with_cards(&hand, &four)));
+            prop_assert!(declaration.is_held_in(&with_cards(&hand, &four)));
         }
 
         /// The napoli is declarable exactly when the hand holds the Ace, Two
@@ -554,7 +554,7 @@ mod tests {
             hand in cards_strategy(),
         ) {
             let held = napoli_cards(suit).iter().all(|card| hand.contains(card));
-            prop_assert_eq!(Declaration::Napoli(suit).can_declare(&hand), held);
+            prop_assert_eq!(Declaration::Napoli(suit).is_held_in(&hand), held);
         }
 
         /// Three of a kind is declarable exactly when the hand holds at least
@@ -566,7 +566,7 @@ mod tests {
         ) {
             let expected = copies_of(&hand, rank) >= Size::Three as usize;
             let declaration = Declaration::Accuso { rank, size: Size::Three };
-            prop_assert_eq!(declaration.can_declare(&hand), expected);
+            prop_assert_eq!(declaration.is_held_in(&hand), expected);
         }
 
         /// Four of a kind is declarable exactly when the hand holds all four
@@ -578,7 +578,7 @@ mod tests {
         ) {
             let expected = copies_of(&hand, rank) >= Size::Four as usize;
             let declaration = Declaration::Accuso { rank, size: Size::Four };
-            prop_assert_eq!(declaration.can_declare(&hand), expected);
+            prop_assert_eq!(declaration.is_held_in(&hand), expected);
         }
 
         /// Adding a card to a hand that holds a set never removes the ability
@@ -598,7 +598,7 @@ mod tests {
                 (Declaration::Accuso { rank, size: Size::Four }, four),
             ] {
                 let larger = with_cards(&with_cards(&hand, &set), &[extra]);
-                prop_assert!(declaration.can_declare(&larger));
+                prop_assert!(declaration.is_held_in(&larger));
             }
         }
 
@@ -639,7 +639,7 @@ mod tests {
             hand in cards_strategy(),
             declaration in declaration_strategy(),
         ) {
-            let expected = if declaration.can_declare(&hand) {
+            let expected = if declaration.is_held_in(&hand) {
                 Ok(())
             } else {
                 Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::NotHeld })

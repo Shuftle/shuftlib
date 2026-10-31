@@ -286,11 +286,6 @@ impl Lead {
         self.play.card()
     }
 
-    /// Returns the card led, as a legal play.
-    pub(crate) fn play(&self) -> Play {
-        self.play
-    }
-
     /// Returns the signal given.
     pub(crate) fn signal(&self) -> Signal {
         self.signal
