@@ -587,7 +587,7 @@ impl Game for Tressette {
             Action::Play(card) => card,
             Action::Declare(declaration) => {
                 let rules = self.config.declarations;
-                let made = Declared::parse(declaration, &hand.declaration_context(rules, seat))?;
+                let made = Declared::new(declaration, &hand.declaration_context(rules, seat))?;
                 hand.declared[seat].push(made);
                 let mut events = Events::new();
                 events.public(Event::Declared {
@@ -604,7 +604,7 @@ impl Game for Tressette {
                     hand: &hand.cards[seat],
                     trick: hand.trick,
                 };
-                Lead::parse(card, signal, &context)?.card()
+                Lead::new(card, signal, &context)?.card()
             }
         };
         let held = &mut hand.cards[seat];
@@ -1315,7 +1315,7 @@ mod tests {
         let expected: HashSet<_> = held
             .iter()
             .flat_map(|&card| Signal::ALL.map(|signal| (card, signal)))
-            .filter(|&(card, signal)| leading && Lead::parse(card, signal, &context).is_ok())
+            .filter(|&(card, signal)| leading && Lead::new(card, signal, &context).is_ok())
             .map(|(card, signal)| Action::Lead { card, signal })
             .collect();
         let offered: HashSet<_> = session

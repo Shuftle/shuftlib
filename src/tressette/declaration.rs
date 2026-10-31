@@ -135,7 +135,7 @@ impl Declared {
     /// [`NotHeld`](DeclarationRefusal::NotHeld),
     /// [`AlreadyDeclared`](DeclarationRefusal::AlreadyDeclared) and
     /// [`ReplacedByFour`](DeclarationRefusal::ReplacedByFour).
-    pub(super) fn parse(declaration: Declaration, context: &Context) -> Result<Self, Error> {
+    pub(super) fn new(declaration: Declaration, context: &Context) -> Result<Self, Error> {
         let refused = |reason| Error::CannotDeclare {
             declaration,
             reason,
@@ -200,7 +200,7 @@ pub enum DeclarationRefusal {
 /// of a rank, only the four may be declared.
 pub(super) fn allowed(context: &Context) -> Vec<Declaration> {
     Declaration::all()
-        .filter(|&declaration| Declared::parse(declaration, context).is_ok())
+        .filter(|&declaration| Declared::new(declaration, context).is_ok())
         .collect()
 }
 
@@ -553,7 +553,7 @@ mod tests {
             let declared: Vec<_> = declared.into_iter().map(Declared).collect();
             let context = Context { rules, trick, hand: &hand, declared: &declared };
             prop_assert_eq!(
-                Declared::parse(declaration, &context).map(|_| ()),
+                Declared::new(declaration, &context).map(|_| ()),
                 Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::WindowClosed })
             );
         }
@@ -590,7 +590,7 @@ mod tests {
             };
             let declared: Vec<_> = declared.into_iter().map(Declared).collect();
             let context = Context { rules, trick, hand: &hand, declared: &declared };
-            prop_assert_eq!(Declared::parse(declaration, &context).map(|_| ()), expected);
+            prop_assert_eq!(Declared::new(declaration, &context).map(|_| ()), expected);
         }
 
         /// The first-trick window allows exactly trick 1.

@@ -115,7 +115,7 @@ pub struct Lead {
 impl Lead {
     /// Reads `signal` on `card` against `context`, or says why it can't be
     /// given.
-    pub(super) fn parse(
+    pub(super) fn new(
         card: TressetteCard,
         signal: Signal,
         context: &Context,
@@ -180,7 +180,7 @@ pub(super) fn allowed(context: &Context) -> Vec<Lead> {
         .hand
         .iter()
         .flat_map(|&card| Signal::ALL.map(|signal| (card, signal)))
-        .filter_map(|(card, signal)| Lead::parse(card, signal, context).ok())
+        .filter_map(|(card, signal)| Lead::new(card, signal, context).ok())
         .collect()
 }
 
@@ -247,7 +247,7 @@ mod tests {
         ) {
             let lead = *pick.get(&hand);
             let expected = same_suit(&hand, lead).is_empty();
-            prop_assert_eq!(Lead::parse(lead, Signal::Volo, &any_signal(&hand)).is_ok(), expected);
+            prop_assert_eq!(Lead::new(lead, Signal::Volo, &any_signal(&hand)).is_ok(), expected);
         }
 
         /// Altra is true exactly when the leader holds one other card of the
@@ -261,7 +261,7 @@ mod tests {
             let same_suit = same_suit(&hand, lead);
             let ace = TressetteCard::new(ItalianRank::Ace, lead.suit());
             let expected = same_suit.len() == 1 && same_suit[0] < ace;
-            prop_assert_eq!(Lead::parse(lead, Signal::Altra, &any_signal(&hand)).is_ok(), expected);
+            prop_assert_eq!(Lead::new(lead, Signal::Altra, &any_signal(&hand)).is_ok(), expected);
         }
 
         /// Striscio is true exactly when the leader holds two or more other
@@ -275,14 +275,14 @@ mod tests {
             let ace = TressetteCard::new(ItalianRank::Ace, lead.suit());
             let same_suit = same_suit(&hand, lead);
             let expected = same_suit.len() >= 2 && same_suit.iter().all(|card| *card < ace);
-            prop_assert_eq!(Lead::parse(lead, Signal::Striscio, &any_signal(&hand)).is_ok(), expected);
+            prop_assert_eq!(Lead::new(lead, Signal::Striscio, &any_signal(&hand)).is_ok(), expected);
         }
 
         /// Busso asks for the partner's best card, so any lead may give it.
         #[test]
         fn busso_is_always_true(hand in hand_strategy(), pick in any::<Index>()) {
             let lead = *pick.get(&hand);
-            prop_assert!(Lead::parse(lead, Signal::Busso, &any_signal(&hand)).is_ok());
+            prop_assert!(Lead::new(lead, Signal::Busso, &any_signal(&hand)).is_ok());
         }
 
         /// Ribusso is true exactly when the leader keeps the Two of the suit led
@@ -300,7 +300,7 @@ mod tests {
                 && hand.contains(&two)
                 && !hand.contains(&three)
                 && !hand.contains(&ace);
-            prop_assert_eq!(Lead::parse(lead, Signal::Ribusso, &any_signal(&hand)).is_ok(), expected);
+            prop_assert_eq!(Lead::new(lead, Signal::Ribusso, &any_signal(&hand)).is_ok(), expected);
         }
 
         /// A signal can be given exactly when the rules allow it and the hand
@@ -315,7 +315,7 @@ mod tests {
         ) {
             let lead = *pick.get(&hand);
             let rules = allowed.iter().copied().fold(Rules::default(), Rules::allow);
-            let matches_hand = Lead::parse(lead, signal, &any_signal(&hand)).is_ok();
+            let matches_hand = Lead::new(lead, signal, &any_signal(&hand)).is_ok();
             let refused = |reason| Err(Error::CannotSignal { signal, reason });
             let expected = if allowed.is_empty() {
                 refused(SignalRefusal::Muto)
@@ -331,7 +331,7 @@ mod tests {
                 hand: &hand,
                 trick: Trick::new(Seat::North),
             };
-            prop_assert_eq!(Lead::parse(lead, signal, &context).map(|_| ()), expected);
+            prop_assert_eq!(Lead::new(lead, signal, &context).map(|_| ()), expected);
         }
 
         /// Once a card is on the trick, no signal can be given, whatever the
@@ -354,7 +354,7 @@ mod tests {
                 trick,
             };
             prop_assert_eq!(
-                Lead::parse(lead, signal, &context).map(|_| ()),
+                Lead::new(lead, signal, &context).map(|_| ()),
                 Err(Error::CannotSignal { signal, reason: SignalRefusal::NotLeading })
             );
         }
