@@ -6,7 +6,10 @@
 
 use crate::cards::italian::{ItalianRank, PerSuit};
 
-use super::{Error, TressetteCard, Trick, trick::Opening};
+use super::{
+    Error, TressetteCard, Trick,
+    trick::{Opening, Play},
+};
 
 /// A signal the seat leading a trick may give with its card.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -199,6 +202,11 @@ impl Lead {
     /// Returns the card led.
     pub(crate) fn card(&self) -> TressetteCard {
         self.opening.card()
+    }
+
+    /// Returns the card led, as a legal play.
+    pub(crate) fn play(&self) -> Play {
+        self.opening.into()
     }
 
     /// Returns the signal given.

@@ -42,7 +42,7 @@ impl Trick {
     /// Leads the trick with `lead`'s card, giving its signal.
     pub(super) fn lead(&mut self, lead: Lead) -> Option<CompletedTrick> {
         self.signal = Some(lead.signal());
-        self.play(lead.card())
+        self.play(lead.play())
     }
 
     /// Returns the seat that led, or will lead, the trick.
@@ -76,10 +76,11 @@ impl Trick {
         self.cards.iter().map_while(|&card| card)
     }
 
-    /// Plays `card` for [`next_to_play`](Self::next_to_play). If that
+    /// Plays `play` for [`next_to_play`](Self::next_to_play). If that
     /// completes the trick, returns it and starts the next one, led by the
     /// taker.
-    pub(super) fn play(&mut self, card: TressetteCard) -> Option<CompletedTrick> {
+    pub(super) fn play(&mut self, play: Play) -> Option<CompletedTrick> {
+        let card = play.card();
         match self.cards {
             [None, _, _] => self.cards[0] = Some(card),
             [Some(_), None, _] => self.cards[1] = Some(card),
@@ -214,12 +215,23 @@ impl Opening {
     }
 }
 
+impl From<Opening> for Play {
+    fn from(opening: Opening) -> Self {
+        Self(opening.card())
+    }
+}
+
 #[cfg(test)]
 /// Test utilities for the trick module.
 pub mod test_utils {
-    use super::Trick;
+    use super::{Play, TressetteCard, Trick};
     use crate::tressette::{deck, table::test_utils::seat_strategy};
     use proptest::{prelude::*, sample};
+
+    /// Returns `card` as played, whether or not it could be.
+    pub(crate) fn played(card: TressetteCard) -> Play {
+        Play(card)
+    }
 
     /// Generates a trick being played, from any leader, with up to three
     /// cards on it.
@@ -228,7 +240,7 @@ pub mod test_utils {
         (seat_strategy(), cards).prop_map(|(leader, cards)| {
             let mut trick = Trick::new(leader);
             for card in cards {
-                trick.play(card);
+                trick.play(played(card));
             }
             trick
         })
@@ -239,7 +251,10 @@ pub mod test_utils {
 mod tests {
     use proptest::{prelude::*, sample};
 
-    use super::{test_utils::trick_strategy, *};
+    use super::{
+        test_utils::{played, trick_strategy},
+        *,
+    };
     use crate::{
         cards::italian::ItalianRank,
         tressette::{
@@ -257,8 +272,8 @@ mod tests {
         let mut trick = Trick::new(Seat::West);
         let ace = card(ItalianRank::Ace, Suit::Clubs);
         let two = card(ItalianRank::Two, Suit::Clubs);
-        assert_eq!(trick.play(ace), None);
-        assert_eq!(trick.play(two), None);
+        assert_eq!(trick.play(played(ace)), None);
+        assert_eq!(trick.play(played(two)), None);
         assert_eq!(
             trick.plays().collect::<Vec<_>>(),
             [(Seat::West, ace), (Seat::South, two)]
@@ -275,7 +290,7 @@ mod tests {
             cards in sample::subsequence(deck().into_iter().collect::<Vec<_>>(), 4).prop_shuffle(),
         ) {
             let mut trick = Trick::new(leader);
-            let completed = cards.iter().find_map(|&card| trick.play(card)).unwrap();
+            let completed = cards.iter().find_map(|&card| trick.play(played(card))).unwrap();
             let led = cards[0].suit();
             let (_, taken_with) = completed
                 .plays()

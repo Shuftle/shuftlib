@@ -7,7 +7,8 @@
 //!   [`TressetteCard::thirds`]), and one for the last trick.
 //! - A team wins with at least [`SCORE_TO_WIN`] points and more than the other.
 //! - Accusi ([`declaration`]) are declared on the seat's turn, before it plays,
-//!   and count only for a team that scored from its tricks.
+//!   and count only for a team that scored from its tricks, the last one
+//!   included.
 //! - Signals ([`signal`]) are given only with a lead.
 //! - When accusi may be made, what others learn from them, and which signals
 //!   are allowed are set by the [`Config`].
@@ -606,11 +607,8 @@ impl Game for Tressette {
             return Err(Error::NoHandInProgress);
         };
         let seat = turn.seat();
-        let (card, lead) = match action {
-            Action::Play(card) => (
-                Play::new(card, &hand.cards[seat], &hand.trick)?.card(),
-                None,
-            ),
+        let (play, lead) = match action {
+            Action::Play(card) => (Play::new(card, &hand.cards[seat], &hand.trick)?, None),
             Action::Declare(declaration) => {
                 let rules = self.config.declarations;
                 let made = Declared::new(declaration, &hand.declaration_context(rules, seat))?;
@@ -632,9 +630,10 @@ impl Game for Tressette {
                     &hand.signal_context(self.config.signals, seat),
                 )?;
                 hand.signalled[seat][lead.card().suit()] = true;
-                (lead.card(), Some(lead))
+                (lead.play(), Some(lead))
             }
         };
+        let card = play.card();
         if hand.trick.led_suit().is_none() {
             hand.led[card.suit()] = true;
         }
@@ -651,7 +650,7 @@ impl Game for Tressette {
             }
             None => {
                 events.public(Event::CardPlayed { seat, card });
-                hand.trick.play(card)
+                hand.trick.play(play)
             }
         };
         if let Some(trick) = completed {
