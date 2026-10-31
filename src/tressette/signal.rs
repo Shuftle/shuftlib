@@ -94,6 +94,10 @@ pub enum SignalRefusal {
     /// The leader already signalled in this suit this hand.
     #[error("a signal was already given in this suit")]
     AlreadySignalled,
+    /// The suit was already led this hand, and only the first lead of a suit
+    /// may carry a ribusso.
+    #[error("ribusso is only for the first lead of a suit")]
+    SuitAlreadyLed,
 }
 
 /// What a leader's signal is read against.
@@ -106,6 +110,8 @@ pub(super) struct Context<'a> {
     pub trick: Trick,
     /// The suits the leader already signalled in this hand.
     pub signalled: PerSuit<bool>,
+    /// The suits that opened a trick so far this hand.
+    pub led: PerSuit<bool>,
 }
 
 /// The card that opens a trick, with the signal given alongside it. It can
@@ -144,6 +150,12 @@ impl Lead {
             return Err(Error::CannotSignal {
                 signal,
                 reason: SignalRefusal::AlreadySignalled,
+            });
+        }
+        if signal == Signal::Ribusso && context.led[card.suit()] {
+            return Err(Error::CannotSignal {
+                signal,
+                reason: SignalRefusal::SuitAlreadyLed,
             });
         }
         let hand = context.hand;
@@ -253,6 +265,7 @@ mod tests {
             hand,
             trick: Trick::new(Seat::North),
             signalled: PerSuit::default(),
+            led: PerSuit::default(),
         }
     }
 
@@ -350,6 +363,7 @@ mod tests {
                 hand: &hand,
                 trick: Trick::new(Seat::North),
                 signalled: PerSuit::default(),
+                led: PerSuit::default(),
             };
             prop_assert_eq!(Lead::new(lead, signal, &context).map(|_| ()), expected);
         }
@@ -373,6 +387,25 @@ mod tests {
             prop_assert_eq!(Lead::new(lead, signal, &context).map(|_| ()), expected);
         }
 
+        /// Once a suit has been led, a ribusso can't be given in it; every
+        /// other signal, and ribusso in a suit not led yet, is unaffected.
+        #[test]
+        fn ribusso_is_only_for_the_first_lead_of_a_suit(
+            hand in hand_strategy(),
+            pick in any::<Index>(),
+            signal in signal_strategy(),
+            led in per_suit_strategy(any::<bool>()),
+        ) {
+            let lead = *pick.get(&hand);
+            let expected = if signal == Signal::Ribusso && led[lead.suit()] {
+                Err(Error::CannotSignal { signal, reason: SignalRefusal::SuitAlreadyLed })
+            } else {
+                Lead::new(lead, signal, &any_signal(&hand)).map(|_| ())
+            };
+            let context = Context { led, ..any_signal(&hand) };
+            prop_assert_eq!(Lead::new(lead, signal, &context).map(|_| ()), expected);
+        }
+
         /// Once a card is on the trick, no signal can be given, whatever the
         /// rules and the hand.
         #[test]
@@ -392,6 +425,7 @@ mod tests {
                 hand: &hand,
                 trick,
                 signalled: PerSuit::default(),
+                led: PerSuit::default(),
             };
             prop_assert_eq!(
                 Lead::new(lead, signal, &context).map(|_| ()),

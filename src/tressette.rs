@@ -210,6 +210,8 @@ struct Hand {
     declared: PerSeat<Vec<Declared>>,
     /// The suits each seat signalled in this hand.
     signalled: PerSeat<PerSuit<bool>>,
+    /// The suits that opened a trick so far this hand.
+    led: PerSuit<bool>,
 }
 
 impl Hand {
@@ -595,6 +597,7 @@ impl Game for Tressette {
                     hand: &hand.cards[seat],
                     trick: hand.trick,
                     signalled: hand.signalled[seat],
+                    led: hand.led,
                 };
                 let lead = Lead::new(card, signal, &context)?;
                 hand.signalled[seat][lead.card().suit()] = true;
@@ -602,6 +605,9 @@ impl Game for Tressette {
             }
         };
         let card = play.card();
+        if hand.trick.led_suit().is_none() {
+            hand.led[card.suit()] = true;
+        }
         hand.cards[seat].retain(|&held| held != card);
         let mut events = Events::new();
         events.public(Event::CardPlayed { seat, card });
@@ -662,6 +668,7 @@ impl Game for Tressette {
             last_trick: None,
             declared: PerSeat::default(),
             signalled: PerSeat::default(),
+            led: PerSuit::default(),
         }));
         Ok(events)
     }
@@ -705,6 +712,7 @@ impl Game for Tressette {
                         hand: &hand.cards[seat],
                         trick: hand.trick,
                         signalled: hand.signalled[seat],
+                        led: hand.led,
                     })
                 }),
         }
@@ -802,6 +810,7 @@ mod tests {
                     last_trick: None,
                     declared: PerSeat::default(),
                     signalled: PerSeat::default(),
+                    led: PerSuit::default(),
                 })),
             },
         )
@@ -1031,6 +1040,7 @@ mod tests {
             last_trick: None,
             declared: PerSeat::default(),
             signalled: PerSeat::default(),
+            led: PerSuit::default(),
         }
     }
 
@@ -1305,12 +1315,14 @@ mod tests {
 
     /// Checks that `seat` is offered a signalled lead exactly when it leads
     /// the trick, for every card and signal the rules and its hand allow,
-    /// having already signalled in the suits marked in `signalled`.
+    /// having already signalled in the suits marked in `signalled`, with the
+    /// suits marked in `led` already led this hand.
     fn assert_signals_are_exact(
         session: &Session<Tressette>,
         config: Config,
         seat: Seat,
         signalled: PerSuit<bool>,
+        led: PerSuit<bool>,
     ) {
         let hand = session.game().phase.hand().unwrap();
         let held = &hand.cards[seat];
@@ -1319,6 +1331,7 @@ mod tests {
             hand: held,
             trick: hand.trick,
             signalled,
+            led,
         };
         let leading = hand.trick.led_suit().is_none();
         let expected: HashSet<_> = held
@@ -1385,6 +1398,7 @@ mod tests {
         let mut declared = PerTeam::<u8>::default();
         let mut hand_actions = 0;
         let mut signalled = PerSeat::<PerSuit<bool>>::default();
+        let mut led = PerSuit::<bool>::default();
         loop {
             let update = match session.status() {
                 Status::Chance => session.resolve_chance(&mut deals).unwrap(),
@@ -1394,7 +1408,7 @@ mod tests {
                     };
                     assert_legality_is_exact(&session, seat);
                     assert_declarable_is_exact(&session, config, seat);
-                    assert_signals_are_exact(&session, config, seat, signalled[seat]);
+                    assert_signals_are_exact(&session, config, seat, signalled[seat], led);
                     if choices.random_ratio(1, 500) {
                         let quitter = Seat::ALL[choices.random_range(0..Seat::ALL.len())];
                         session.forfeit(quitter).unwrap()
@@ -1403,7 +1417,16 @@ mod tests {
                         assert!(hand_actions <= MAX_HAND_ACTIONS, "the hand never ends");
                         let legal = session.observe(seat).legal_actions();
                         let action = legal[choices.random_range(0..legal.len())];
+                        let leading = session
+                            .observe(seat)
+                            .trick()
+                            .is_some_and(|trick| trick.led_suit().is_none());
                         let update = session.act(seat, action).unwrap();
+                        if let (true, Action::Play(card) | Action::Lead { card, .. }) =
+                            (leading, action)
+                        {
+                            led[card.suit()] = true;
+                        }
                         if let Action::Lead { card, .. } = action {
                             signalled[seat][card.suit()] = true;
                         }
@@ -1441,6 +1464,7 @@ mod tests {
                         declared = PerTeam::default();
                         hand_actions = 0;
                         signalled = PerSeat::default();
+                        led = PerSuit::default();
                     }
                     Event::Declared { seat, points, .. } => declared[seat.team()] += points,
                     Event::HandScored { points, .. } => assert_hand_points(*points, declared),
