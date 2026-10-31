@@ -79,7 +79,7 @@ mod table;
 mod trick;
 
 pub use card::TressetteCard;
-use declaration::{Declaration, DeclarationRefusal};
+use declaration::{Declaration, DeclarationRefusal, Declared};
 use signal::{Signal, SignalRefusal};
 pub use table::{PerSeat, PerTeam, Seat, Team};
 pub use trick::{CompletedTrick, Trick};
@@ -201,10 +201,24 @@ struct Hand {
     /// The last trick completed, if any.
     last_trick: Option<CompletedTrick>,
     /// What each seat declared this hand.
-    declared: PerSeat<Vec<Declaration>>,
+    declared: PerSeat<Vec<Declared>>,
 }
 
 impl Hand {
+    /// Returns what a declaration by `seat` is read against, under `rules`.
+    fn declaration_context(
+        &self,
+        rules: declaration::Rules,
+        seat: Seat,
+    ) -> declaration::Context<'_> {
+        declaration::Context {
+            rules,
+            trick: self.current_trick(),
+            hand: &self.cards[seat],
+            declared: &self.declared[seat],
+        }
+    }
+
     /// Returns the 1-based number of the trick being played.
     fn current_trick(&self) -> usize {
         let taken: usize = Team::ALL.iter().map(|&team| self.taken[team].len()).sum();
@@ -225,7 +239,7 @@ impl Hand {
                 .iter()
                 .filter(|seat| seat.team() == team)
                 .flat_map(|&seat| &self.declared[seat])
-                .map(Declaration::points)
+                .map(|made| made.declaration().points())
                 .sum();
             from_tricks + declared
         })
@@ -559,21 +573,8 @@ impl Game for Tressette {
             Action::Play(card) => card,
             Action::Declare(declaration) => {
                 let rules = self.config.declarations;
-                if !rules.window.allows(hand.current_trick()) {
-                    return Err(Error::CannotDeclare {
-                        declaration,
-                        reason: DeclarationRefusal::WindowClosed,
-                    });
-                }
-                if !declaration::allowed(&hand.cards[seat], &hand.declared[seat])
-                    .contains(&declaration)
-                {
-                    return Err(Error::CannotDeclare {
-                        declaration,
-                        reason: DeclarationRefusal::NotHeld,
-                    });
-                }
-                hand.declared[seat].push(declaration);
+                let made = Declared::parse(declaration, &hand.declaration_context(rules, seat))?;
+                hand.declared[seat].push(made);
                 let mut events = Events::new();
                 events.public(Event::Declared {
                     seat,
@@ -683,12 +684,9 @@ impl Game for Tressette {
             dealer: self.dealer,
             declarable: hand
                 .zip(viewer.seat())
-                .filter(|(hand, seat)| {
-                    hand.trick.next_to_play() == *seat
-                        && self.config.declarations.window.allows(hand.current_trick())
-                })
+                .filter(|(hand, seat)| hand.trick.next_to_play() == *seat)
                 .map_or(Vec::new(), |(hand, seat)| {
-                    declaration::allowed(&hand.cards[seat], &hand.declared[seat])
+                    declaration::allowed(&hand.declaration_context(self.config.declarations, seat))
                 }),
         }
     }
@@ -723,7 +721,10 @@ mod tests {
         engine::{ActError, ActResult, Audience, ChanceError, Session, UpdateOf},
         tressette::{
             card::test_utils::cards_strategy,
-            declaration::{Visibility, test_utils::declared_by_seat_strategy},
+            declaration::{
+                Visibility,
+                test_utils::{declared_by_seat_strategy, made},
+            },
             table::test_utils::seat_strategy,
             test_utils::config_strategy,
         },
@@ -915,13 +916,15 @@ mod tests {
         ) {
             let mut hand = split_deck(&north_south_takes, last_taker);
             let from_tricks = hand.points(last_taker);
-            hand.declared = declared;
+            hand.declared = PerSeat::from_fn(|seat| {
+                declared[seat].iter().copied().map(made).collect()
+            });
             let points = hand.points(last_taker);
             for team in Team::ALL {
                 let declared: u8 = Seat::ALL
                     .iter()
                     .filter(|seat| seat.team() == team)
-                    .flat_map(|&seat| &hand.declared[seat])
+                    .flat_map(|&seat| &declared[seat])
                     .map(Declaration::points)
                     .sum();
                 let expected = if from_tricks[team] >= TRICK_POINTS_FOR_DECLARATIONS {
@@ -1244,11 +1247,12 @@ mod tests {
         let hand = session.game().phase.hand().unwrap();
         // The seat to act has played one card per completed trick.
         let trick = HAND_SIZE - hand.cards[seat].len() + 1;
-        let expected = if config.declarations.window.allows(trick) {
-            declaration::allowed(&hand.cards[seat], &hand.declared[seat])
-        } else {
-            Vec::new()
-        };
+        let expected = declaration::allowed(&declaration::Context {
+            rules: config.declarations,
+            trick,
+            hand: &hand.cards[seat],
+            declared: &hand.declared[seat],
+        });
         assert_eq!(session.observe(seat).declarable(), expected);
     }
 

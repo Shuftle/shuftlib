@@ -124,6 +124,11 @@ pub(super) struct Context<'a> {
 pub(crate) struct Declared(Declaration);
 
 impl Declared {
+    /// Returns the declaration made.
+    pub(crate) fn declaration(self) -> Declaration {
+        self.0
+    }
+
     /// Reads `declaration` against `context`, or says why it can't be made:
     /// when several reasons apply, the first of
     /// [`WindowClosed`](DeclarationRefusal::WindowClosed),
@@ -188,30 +193,14 @@ pub enum DeclarationRefusal {
     ReplacedByFour,
 }
 
-/// Returns the declarations a seat holding `hand` may still make, having
-/// already made `declared`.
+/// Returns the declarations a seat may make in `context`.
 ///
 /// A napoli may share its cards with an accuso, but a seat makes at most one
 /// accuso per rank, and four of a kind replaces three: holding all four cards
 /// of a rank, only the four may be declared.
-pub fn allowed(hand: &[TressetteCard], declared: &[Declaration]) -> Vec<Declaration> {
+pub(super) fn allowed(context: &Context) -> Vec<Declaration> {
     Declaration::all()
-        .filter(|declaration| declaration.can_declare(hand))
-        .filter(|declaration| match *declaration {
-            Declaration::Napoli(_) => !declared.contains(declaration),
-            Declaration::Accuso { rank, size } => {
-                let replaced_by_four = size == Size::Three
-                    && Declaration::Accuso {
-                        rank,
-                        size: Size::Four,
-                    }
-                    .can_declare(hand);
-                let rank_taken = declared.iter().any(
-                    |made| matches!(made, Declaration::Accuso { rank: taken, .. } if *taken == rank),
-                );
-                !replaced_by_four && !rank_taken
-            }
-        })
+        .filter(|&declaration| Declared::parse(declaration, context).is_ok())
         .collect()
 }
 
@@ -262,13 +251,18 @@ pub struct Rules {
 #[cfg(test)]
 /// Test utilities for the declaration module.
 pub mod test_utils {
-    use super::{DeclarableRank, Declaration, Rules, Visibility, Window};
+    use super::{DeclarableRank, Declaration, Declared, Rules, Visibility, Window};
     use crate::tressette::PerSeat;
     use proptest::{prelude::*, sample};
 
     /// Generates any rank that can be declared as a set.
     pub fn declarable_rank_strategy() -> impl Strategy<Value = DeclarableRank> {
         sample::select(DeclarableRank::ALL.to_vec())
+    }
+
+    /// Returns `declaration` as made, whether or not it could be.
+    pub(crate) fn made(declaration: Declaration) -> Declared {
+        Declared(declaration)
     }
 
     /// Generates any declaration, whether or not it could be made.
@@ -358,6 +352,21 @@ mod tests {
             .count()
     }
 
+    /// Returns the declarations a seat holding `hand` may make on the first
+    /// trick, having already made `declared`.
+    fn allowed_on_first_trick(
+        hand: &[TressetteCard],
+        declared: &[Declaration],
+    ) -> Vec<Declaration> {
+        let declared: Vec<_> = declared.iter().copied().map(Declared).collect();
+        allowed(&Context {
+            rules: Rules::default(),
+            trick: 1,
+            hand,
+            declared: &declared,
+        })
+    }
+
     /// Returns whether `declared` holds an accuso of `rank`, of either size.
     fn accuso_declared(declared: &[Declaration], rank: DeclarableRank) -> bool {
         declared
@@ -393,7 +402,7 @@ mod tests {
             let hand = if held { with_cards(&hand, &napoli_cards(suit)) } else { hand };
             let napoli = Declaration::Napoli(suit);
             let expected = napoli.can_declare(&hand) && !declared.contains(&napoli);
-            prop_assert_eq!(allowed(&hand, &declared).contains(&napoli), expected);
+            prop_assert_eq!(allowed_on_first_trick(&hand, &declared).contains(&napoli), expected);
         }
 
         /// Four of a kind is allowed exactly when the hand holds all four
@@ -409,7 +418,7 @@ mod tests {
             let four = Declaration::Accuso { rank, size: Size::Four };
             let expected = copies_of(&hand, rank) == Size::Four as usize
                 && !accuso_declared(&declared, rank);
-            prop_assert_eq!(allowed(&hand, &declared).contains(&four), expected);
+            prop_assert_eq!(allowed_on_first_trick(&hand, &declared).contains(&four), expected);
         }
 
         /// Three of a kind is allowed exactly when the hand holds three cards
@@ -425,7 +434,7 @@ mod tests {
             let three = Declaration::Accuso { rank, size: Size::Three };
             let expected = copies_of(&hand, rank) == Size::Three as usize
                 && !accuso_declared(&declared, rank);
-            prop_assert_eq!(allowed(&hand, &declared).contains(&three), expected);
+            prop_assert_eq!(allowed_on_first_trick(&hand, &declared).contains(&three), expected);
         }
 
         /// Any hand that holds a set can declare it, whatever else it holds.
