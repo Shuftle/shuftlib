@@ -2,7 +2,7 @@
 name = "shuftlib"
 version = "0.5.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 authors = ["Sebastiano Giordano"]
 categories = ["game-development"]
 description = "A library for turn-based games: an engine for multiplayer servers, clients and bots, with Tressette"

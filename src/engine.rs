@@ -876,7 +876,7 @@ impl<G: Game> Session<G> {
 mod tests {
     use std::ops::Range;
 
-    use proptest::prelude::*;
+    use proptest::{collection::vec, option, prelude::*};
     use rand::{RngExt, SeedableRng, rngs::StdRng, seq::IndexedRandom};
 
     use super::*;
@@ -1009,7 +1009,7 @@ mod tests {
             }
             self.secret = Some(secret);
             let mut events = Events::new();
-            events.private(Seat::First, Event::SecretIsEven(secret % 2 == 0));
+            events.private(Seat::First, Event::SecretIsEven(secret.is_multiple_of(2)));
             Ok(events)
         }
 
@@ -1348,7 +1348,7 @@ mod tests {
 
         #[test]
         fn waiting_keeps_each_seat_once_in_order_of_first_appearance(
-            seats in prop::collection::vec(0u8..8, 0..20),
+            seats in vec(0u8..8, 0..20),
         ) {
             let waiting = Waiting::new(seats.clone());
             // Nobody to wait on isn't a wait, and a single seat is the same
@@ -1371,7 +1371,7 @@ mod tests {
         /// public ones, each in its original place in the order.
         #[test]
         fn events_are_visible_to_their_audience(
-            events in prop::collection::vec((prop::option::of(0u8..4), any::<u16>()), 0..20),
+            events in vec((option::of(0u8..4), any::<u16>()), 0..20),
             seat in 0u8..4,
         ) {
             let mut all = Events::new();

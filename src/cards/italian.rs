@@ -4,7 +4,10 @@
 //! Italian deck: ace through seven, then jack, knight and king, in four
 //! suits.
 
-use std::fmt::Display;
+use std::{
+    fmt::Display,
+    ops::{Index, IndexMut},
+};
 
 use crate::cards::Card;
 
@@ -99,6 +102,43 @@ impl Display for Suit {
     }
 }
 
+/// A value for each suit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub(crate) struct PerSuit<T> {
+    /// The value for Coins.
+    pub coins: T,
+    /// The value for Cups.
+    pub cups: T,
+    /// The value for Swords.
+    pub swords: T,
+    /// The value for Clubs.
+    pub clubs: T,
+}
+
+impl<T> Index<Suit> for PerSuit<T> {
+    type Output = T;
+
+    fn index(&self, suit: Suit) -> &T {
+        match suit {
+            Suit::Coins => &self.coins,
+            Suit::Cups => &self.cups,
+            Suit::Swords => &self.swords,
+            Suit::Clubs => &self.clubs,
+        }
+    }
+}
+
+impl<T> IndexMut<Suit> for PerSuit<T> {
+    fn index_mut(&mut self, suit: Suit) -> &mut T {
+        match suit {
+            Suit::Coins => &mut self.coins,
+            Suit::Cups => &mut self.cups,
+            Suit::Swords => &mut self.swords,
+            Suit::Clubs => &mut self.clubs,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 #[repr(u8)]
 /// The rank of the card. In an Italian deck, ranks go from the ace to the 7, then they also have a jack, knight and king.
@@ -163,7 +203,8 @@ impl Display for ItalianRank {
 #[cfg(test)]
 /// Test utilities for the Italian card module.
 pub mod test_utils {
-    use super::{ItalianCard, ItalianRank, Suit};
+    use super::{ItalianCard, ItalianRank, PerSuit, Suit};
+    use proptest::array::uniform4;
     use proptest::prelude::*;
     use proptest::sample;
 
@@ -181,6 +222,18 @@ pub mod test_utils {
     pub fn italian_card_strategy() -> impl Strategy<Value = ItalianCard> {
         (italian_rank_strategy(), suit_strategy())
             .prop_map(|(rank, suit)| ItalianCard::new(rank, suit))
+    }
+
+    /// Generates a value for each suit, each drawn from `value`.
+    pub(crate) fn per_suit_strategy<S: Strategy>(
+        value: S,
+    ) -> impl Strategy<Value = PerSuit<S::Value>> {
+        uniform4(value).prop_map(|[coins, cups, swords, clubs]| PerSuit {
+            coins,
+            cups,
+            swords,
+            clubs,
+        })
     }
 }
 

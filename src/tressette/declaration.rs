@@ -1,13 +1,14 @@
 //! Declarations (accusi) of Tressette: the napoli, and sets of three or four
 //! cards of one rank.
 //!
-//! What counts as a declaration, and when it may be made, depends on the
-//! regional variant, so the timing and visibility are a [`Rules`] value rather
-//! than fixed behaviour.
+//! When declarations may be made, and what others learn from them, depends on
+//! the regional variant: see [`Declarations`].
+
+use std::fmt::{self, Display};
 
 use crate::cards::italian::{ItalianRank, Suit};
 
-use super::TressetteCard;
+use super::{Error, TressetteCard};
 
 /// Points for a napoli: the Ace, Two and Three of one suit.
 pub const NAPOLI_POINTS: u8 = 3;
@@ -16,9 +17,31 @@ pub const THREE_OF_A_KIND_POINTS: u8 = 3;
 /// Points for four cards of one rank.
 pub const FOUR_OF_A_KIND_POINTS: u8 = 4;
 
-/// The ranks that can be declared as a set.
-pub const DECLARABLE_RANKS: [ItalianRank; 3] =
-    [ItalianRank::Three, ItalianRank::Two, ItalianRank::Ace];
+/// A rank that can be declared as a set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DeclarableRank {
+    /// Threes.
+    Three,
+    /// Twos.
+    Two,
+    /// Aces.
+    Ace,
+}
+
+impl DeclarableRank {
+    /// Every rank that can be declared as a set.
+    pub const ALL: [Self; 3] = [Self::Three, Self::Two, Self::Ace];
+}
+
+impl From<DeclarableRank> for ItalianRank {
+    fn from(rank: DeclarableRank) -> Self {
+        match rank {
+            DeclarableRank::Three => Self::Three,
+            DeclarableRank::Two => Self::Two,
+            DeclarableRank::Ace => Self::Ace,
+        }
+    }
+}
 
 /// The ranks that make up a napoli, in any suit.
 const NAPOLI_RANKS: [ItalianRank; 3] = [ItalianRank::Ace, ItalianRank::Two, ItalianRank::Three];
@@ -40,10 +63,30 @@ pub enum Declaration {
     /// Three or four cards of one declarable rank.
     Accuso {
         /// The rank of the cards.
-        rank: ItalianRank,
+        rank: DeclarableRank,
         /// How many cards of that rank.
         size: Size,
     },
+}
+
+impl Display for Declaration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Napoli(suit) => write!(f, "napoli of {suit}"),
+            Self::Accuso { rank, size } => {
+                let count = match size {
+                    Size::Three => "three",
+                    Size::Four => "four",
+                };
+                let ranks = match rank {
+                    DeclarableRank::Three => "Threes",
+                    DeclarableRank::Two => "Twos",
+                    DeclarableRank::Ace => "Aces",
+                };
+                write!(f, "{count} {ranks}")
+            }
+        }
+    }
 }
 
 impl Declaration {
@@ -64,51 +107,179 @@ impl Declaration {
     /// four of a kind of each declarable rank.
     pub fn all() -> impl Iterator<Item = Self> {
         let napoli = Suit::ALL.into_iter().map(Self::Napoli);
-        let accusi = DECLARABLE_RANKS
+        let accusi = DeclarableRank::ALL
             .into_iter()
             .flat_map(|rank| [Size::Three, Size::Four].map(|size| Self::Accuso { rank, size }));
         napoli.chain(accusi)
     }
 
-    /// Returns whether `hand` holds every card this declaration needs, and
-    /// the rank is one that can be declared.
-    pub fn can_declare(&self, hand: &[TressetteCard]) -> bool {
+    /// Returns whether `hand` holds every card this declaration needs.
+    pub fn is_held_in(&self, hand: &[TressetteCard]) -> bool {
         match *self {
             Self::Napoli(suit) => NAPOLI_RANKS
                 .iter()
                 .all(|&rank| hand.contains(&TressetteCard::new(rank, suit))),
             Self::Accuso { rank, size } => {
-                DECLARABLE_RANKS.contains(&rank)
-                    && hand.iter().filter(|card| card.rank() == rank).count() >= size as usize
+                let rank = ItalianRank::from(rank);
+                hand.iter().filter(|card| card.rank() == rank).count() >= size as usize
             }
         }
     }
 }
 
-/// Returns the declarations a seat holding `hand` may still make, having
-/// already made `declared`.
+/// What a seat's declaration is read against.
+pub(super) struct Context<'a> {
+    /// The variant's declaration rules.
+    pub rules: Declarations,
+    /// The 1-based number of the trick being played.
+    pub trick: usize,
+    /// The seat's cards.
+    pub hand: &'a [TressetteCard],
+    /// What the seat already declared this hand.
+    pub declared: &'a [Declared],
+}
+
+/// Returns `declaration` refused for `reason`.
+fn refused(declaration: Declaration, reason: DeclarationRefusal) -> Error {
+    Error::CannotDeclare {
+        declaration,
+        reason,
+    }
+}
+
+/// A declaration proposed on a trick the variant allows declarations on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct InWindow(Declaration);
+
+impl InWindow {
+    /// Builds `declaration` as proposed on the 1-based `trick` under `rules`,
+    /// or returns that the window is closed.
+    pub(crate) fn new(
+        declaration: Declaration,
+        rules: Declarations,
+        trick: usize,
+    ) -> Result<Self, Error> {
+        if rules.window.allows(trick) {
+            Ok(Self(declaration))
+        } else {
+            Err(refused(declaration, DeclarationRefusal::WindowClosed))
+        }
+    }
+
+    /// Checks the declaration against `hand`, or returns that the hand
+    /// doesn't hold its cards.
+    pub(crate) fn held(self, hand: &[TressetteCard]) -> Result<HeldDeclaration<'_>, Error> {
+        if self.0.is_held_in(hand) {
+            Ok(HeldDeclaration {
+                declaration: self.0,
+                hand,
+            })
+        } else {
+            Err(refused(self.0, DeclarationRefusal::NotHeld))
+        }
+    }
+}
+
+/// A declaration in the window whose cards the seat holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct HeldDeclaration<'a> {
+    declaration: Declaration,
+    hand: &'a [TressetteCard],
+}
+
+impl<'a> HeldDeclaration<'a> {
+    /// Checks the declaration against what the seat already `declared`, or
+    /// returns that it, or an accuso of its rank, was already made.
+    pub(crate) fn unmade(self, declared: &[Declared]) -> Result<Unmade<'a>, Error> {
+        let declaration = self.declaration;
+        let already = declared
+            .iter()
+            .any(|&Declared(made)| match (declaration, made) {
+                (Declaration::Napoli(_), _) => made == declaration,
+                (Declaration::Accuso { rank, .. }, Declaration::Accuso { rank: taken, .. }) => {
+                    rank == taken
+                }
+                (Declaration::Accuso { .. }, Declaration::Napoli(_)) => false,
+            });
+        if already {
+            Err(refused(declaration, DeclarationRefusal::AlreadyDeclared))
+        } else {
+            Ok(Unmade(self))
+        }
+    }
+}
+
+/// A held declaration in the window that the seat hasn't made yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Unmade<'a>(HeldDeclaration<'a>);
+
+impl Unmade<'_> {
+    /// Makes the declaration, or returns that it's three of a kind while
+    /// the hand holds all four.
+    pub(crate) fn declare(self) -> Result<Declared, Error> {
+        let HeldDeclaration { declaration, hand } = self.0;
+        if let Declaration::Accuso {
+            rank,
+            size: Size::Three,
+        } = declaration
+            && (Declaration::Accuso {
+                rank,
+                size: Size::Four,
+            })
+            .is_held_in(hand)
+        {
+            return Err(refused(declaration, DeclarationRefusal::ReplacedByFour));
+        }
+        Ok(Declared(declaration))
+    }
+}
+
+/// A declaration a seat made, as the rules allowed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Declared(Declaration);
+
+impl Declared {
+    /// Returns the declaration made.
+    pub(crate) fn declaration(self) -> Declaration {
+        self.0
+    }
+}
+
+/// Makes `declaration` in `context`, through each rule a declaration must
+/// meet.
+pub(super) fn declare(declaration: Declaration, context: &Context) -> Result<Declared, Error> {
+    InWindow::new(declaration, context.rules, context.trick)?
+        .held(context.hand)?
+        .unmade(context.declared)?
+        .declare()
+}
+
+/// Why a declaration can't be made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+pub enum DeclarationRefusal {
+    /// The rules don't allow declarations on this trick.
+    #[error("declarations aren't allowed on this trick")]
+    WindowClosed,
+    /// The hand doesn't hold its cards.
+    #[error("the hand doesn't hold its cards")]
+    NotHeld,
+    /// It, or an accuso of the same rank, was already declared.
+    #[error("it was already declared")]
+    AlreadyDeclared,
+    /// The hand holds all four cards of the rank, so only four of a kind may
+    /// be declared.
+    #[error("the hand holds all four, so only four of a kind may be declared")]
+    ReplacedByFour,
+}
+
+/// Returns the declarations a seat may make in `context`.
 ///
 /// A napoli may share its cards with an accuso, but a seat makes at most one
 /// accuso per rank, and four of a kind replaces three: holding all four cards
 /// of a rank, only the four may be declared.
-pub fn allowed(hand: &[TressetteCard], declared: &[Declaration]) -> Vec<Declaration> {
+pub(super) fn allowed(context: &Context) -> Vec<Declaration> {
     Declaration::all()
-        .filter(|declaration| declaration.can_declare(hand))
-        .filter(|declaration| match *declaration {
-            Declaration::Napoli(_) => !declared.contains(declaration),
-            Declaration::Accuso { rank, size } => {
-                let replaced_by_four = size == Size::Three
-                    && Declaration::Accuso {
-                        rank,
-                        size: Size::Four,
-                    }
-                    .can_declare(hand);
-                let rank_taken = declared.iter().any(
-                    |made| matches!(made, Declaration::Accuso { rank: taken, .. } if *taken == rank),
-                );
-                !replaced_by_four && !rank_taken
-            }
-        })
+        .filter(|&declaration| declare(declaration, context).is_ok())
         .collect()
 }
 
@@ -130,7 +301,7 @@ impl Window {
     pub fn allows(self, trick: usize) -> bool {
         match self {
             Self::FirstTrick => trick == 1,
-            Self::FirstThreeTricks => trick <= LAST_TRICK_OF_FIRST_THREE,
+            Self::FirstThreeTricks => (1..=LAST_TRICK_OF_FIRST_THREE).contains(&trick),
         }
     }
 }
@@ -149,7 +320,7 @@ pub enum Visibility {
 /// The declaration rules of one regional variant. The default allows
 /// declarations on the first three tricks, with full visibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct Rules {
+pub struct Declarations {
     /// The tricks on which a declaration may be made.
     pub window: Window,
     /// What other seats learn from a declaration.
@@ -157,32 +328,74 @@ pub struct Rules {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::cards::italian::test_utils::{italian_rank_strategy, suit_strategy};
-    use crate::tressette::HAND_SIZE;
+/// Test utilities for the declaration module.
+pub mod test_utils {
+    use super::{DeclarableRank, Declaration, Declarations, Declared, Visibility, Window};
+    use crate::tressette::PerSeat;
     use proptest::{prelude::*, sample};
 
-    fn all_cards() -> Vec<TressetteCard> {
-        ItalianRank::ALL
-            .iter()
-            .flat_map(|&rank| {
-                Suit::ALL
-                    .iter()
-                    .map(move |&suit| TressetteCard::new(rank, suit))
+    /// Generates any rank that can be declared as a set.
+    pub fn declarable_rank_strategy() -> impl Strategy<Value = DeclarableRank> {
+        sample::select(DeclarableRank::ALL.to_vec())
+    }
+
+    /// Returns `declaration` as made, whether or not it could be.
+    pub(crate) fn made(declaration: Declaration) -> Declared {
+        Declared(declaration)
+    }
+
+    /// Generates any declaration, whether or not it could be made.
+    pub fn declaration_strategy() -> impl Strategy<Value = Declaration> {
+        sample::select(Declaration::all().collect::<Vec<_>>())
+    }
+
+    /// Generates any set of distinct declarations, whether or not they could
+    /// be made.
+    pub fn declarations_strategy() -> impl Strategy<Value = Vec<Declaration>> {
+        let all: Vec<_> = Declaration::all().collect();
+        let size = all.len();
+        sample::subsequence(all, 0..=size)
+    }
+
+    /// Generates any declarations for each seat, whether or not they could be
+    /// made.
+    pub fn declared_by_seat_strategy() -> impl Strategy<Value = PerSeat<Vec<Declaration>>> {
+        (
+            declarations_strategy(),
+            declarations_strategy(),
+            declarations_strategy(),
+            declarations_strategy(),
+        )
+            .prop_map(|(north, east, south, west)| PerSeat {
+                north,
+                east,
+                south,
+                west,
             })
-            .collect()
     }
 
-    fn hand_strategy() -> impl Strategy<Value = Vec<TressetteCard>> {
-        let deck = all_cards();
-        let size = deck.len();
-        sample::subsequence(deck, 0..=size)
+    /// Generates any declaration rules.
+    pub fn rules_strategy() -> impl Strategy<Value = Declarations> {
+        let window = sample::select(vec![Window::FirstTrick, Window::FirstThreeTricks]);
+        let visibility = sample::select(vec![Visibility::Anonymous, Visibility::Exact]);
+        (window, visibility).prop_map(|(window, visibility)| Declarations { window, visibility })
     }
+}
 
-    fn card_strategy() -> impl Strategy<Value = TressetteCard> {
-        sample::select(all_cards())
-    }
+#[cfg(test)]
+mod tests {
+    use super::{
+        test_utils::{
+            declarable_rank_strategy, declaration_strategy, declarations_strategy, rules_strategy,
+        },
+        *,
+    };
+    use crate::cards::italian::test_utils::suit_strategy;
+    use crate::tressette::{
+        HAND_SIZE,
+        card::test_utils::{cards_strategy, tressette_card_strategy},
+    };
+    use proptest::prelude::*;
 
     /// Returns `hand` with every card of `cards` it does not already hold.
     fn with_cards(hand: &[TressetteCard], cards: &[TressetteCard]) -> Vec<TressetteCard> {
@@ -204,26 +417,51 @@ mod tests {
     }
 
     /// The first `count` cards of `rank`, one per suit.
-    fn cards_of_rank(rank: ItalianRank, count: usize) -> Vec<TressetteCard> {
+    fn cards_of_rank(rank: DeclarableRank, count: usize) -> Vec<TressetteCard> {
         Suit::ALL
             .iter()
             .take(count)
-            .map(|&suit| TressetteCard::new(rank, suit))
+            .map(|&suit| TressetteCard::new(rank.into(), suit))
             .collect()
     }
 
-    fn copies_of(hand: &[TressetteCard], rank: ItalianRank) -> usize {
-        hand.iter().filter(|card| card.rank() == rank).count()
+    fn copies_of(hand: &[TressetteCard], rank: DeclarableRank) -> usize {
+        hand.iter()
+            .filter(|card| card.rank() == ItalianRank::from(rank))
+            .count()
     }
 
-    fn declarations_strategy() -> impl Strategy<Value = Vec<Declaration>> {
-        let all: Vec<_> = Declaration::all().collect();
-        let size = all.len();
-        sample::subsequence(all, 0..=size)
+    /// Returns the declarations a seat holding `hand` may make on the first
+    /// trick, having already made `declared`.
+    fn allowed_on_first_trick(
+        hand: &[TressetteCard],
+        declared: &[Declaration],
+    ) -> Vec<Declaration> {
+        let declared: Vec<_> = declared.iter().copied().map(Declared).collect();
+        allowed(&Context {
+            rules: Declarations::default(),
+            trick: 1,
+            hand,
+            declared: &declared,
+        })
+    }
+
+    /// Returns `declaration` proposed on the first trick, which every window
+    /// allows.
+    fn in_window(declaration: Declaration) -> InWindow {
+        InWindow::new(declaration, Declarations::default(), 1).expect("the window is open")
+    }
+
+    /// Returns the cards `declaration` is made of.
+    fn cards_of(declaration: Declaration) -> Vec<TressetteCard> {
+        match declaration {
+            Declaration::Napoli(suit) => napoli_cards(suit),
+            Declaration::Accuso { rank, size } => cards_of_rank(rank, size as usize),
+        }
     }
 
     /// Returns whether `declared` holds an accuso of `rank`, of either size.
-    fn accuso_declared(declared: &[Declaration], rank: ItalianRank) -> bool {
+    fn accuso_declared(declared: &[Declaration], rank: DeclarableRank) -> bool {
         declared
             .iter()
             .any(|declaration| matches!(declaration, Declaration::Accuso { rank: declared, .. } if *declared == rank))
@@ -235,7 +473,7 @@ mod tests {
         #[test]
         fn all_declarations_cover_every_napoli_and_accuso(
             suit in suit_strategy(),
-            rank in sample::select(DECLARABLE_RANKS.to_vec()),
+            rank in declarable_rank_strategy(),
         ) {
             let all: Vec<_> = Declaration::all().collect();
             let three = Declaration::Accuso { rank, size: Size::Three };
@@ -251,61 +489,61 @@ mod tests {
         fn a_napoli_is_allowed_when_held_and_not_yet_declared(
             suit in suit_strategy(),
             held in any::<bool>(),
-            hand in hand_strategy(),
+            hand in cards_strategy(),
             declared in declarations_strategy(),
         ) {
             let hand = if held { with_cards(&hand, &napoli_cards(suit)) } else { hand };
             let napoli = Declaration::Napoli(suit);
-            let expected = napoli.can_declare(&hand) && !declared.contains(&napoli);
-            prop_assert_eq!(allowed(&hand, &declared).contains(&napoli), expected);
+            let expected = napoli.is_held_in(&hand) && !declared.contains(&napoli);
+            prop_assert_eq!(allowed_on_first_trick(&hand, &declared).contains(&napoli), expected);
         }
 
         /// Four of a kind is allowed exactly when the hand holds all four
         /// cards of the rank and no accuso of it was declared.
         #[test]
         fn four_of_a_kind_is_allowed_when_held_and_the_rank_is_free(
-            rank in sample::select(DECLARABLE_RANKS.to_vec()),
+            rank in declarable_rank_strategy(),
             copies in 0..=Size::Four as usize,
-            hand in hand_strategy(),
+            hand in cards_strategy(),
             declared in declarations_strategy(),
         ) {
             let hand = with_cards(&hand, &cards_of_rank(rank, copies));
             let four = Declaration::Accuso { rank, size: Size::Four };
             let expected = copies_of(&hand, rank) == Size::Four as usize
                 && !accuso_declared(&declared, rank);
-            prop_assert_eq!(allowed(&hand, &declared).contains(&four), expected);
+            prop_assert_eq!(allowed_on_first_trick(&hand, &declared).contains(&four), expected);
         }
 
         /// Three of a kind is allowed exactly when the hand holds three cards
         /// of the rank, not all four, and no accuso of it was declared.
         #[test]
         fn three_of_a_kind_is_allowed_when_four_is_not_held_and_the_rank_is_free(
-            rank in sample::select(DECLARABLE_RANKS.to_vec()),
+            rank in declarable_rank_strategy(),
             copies in 0..=Size::Four as usize,
-            hand in hand_strategy(),
+            hand in cards_strategy(),
             declared in declarations_strategy(),
         ) {
             let hand = with_cards(&hand, &cards_of_rank(rank, copies));
             let three = Declaration::Accuso { rank, size: Size::Three };
             let expected = copies_of(&hand, rank) == Size::Three as usize
                 && !accuso_declared(&declared, rank);
-            prop_assert_eq!(allowed(&hand, &declared).contains(&three), expected);
+            prop_assert_eq!(allowed_on_first_trick(&hand, &declared).contains(&three), expected);
         }
 
-        /// Any hand that holds a set can declare it, whatever else it holds.
+        /// A set is held in any hand that holds its cards, whatever else it holds.
         #[test]
-        fn a_hand_holding_the_set_can_declare_it(
+        fn a_set_is_held_in_any_hand_holding_its_cards(
             suit in suit_strategy(),
-            rank in sample::select(DECLARABLE_RANKS.to_vec()),
-            hand in hand_strategy(),
+            rank in declarable_rank_strategy(),
+            hand in cards_strategy(),
         ) {
-            prop_assert!(Declaration::Napoli(suit).can_declare(&with_cards(&hand, &napoli_cards(suit))));
+            prop_assert!(Declaration::Napoli(suit).is_held_in(&with_cards(&hand, &napoli_cards(suit))));
             let three = cards_of_rank(rank, Size::Three as usize);
             let declaration = Declaration::Accuso { rank, size: Size::Three };
-            prop_assert!(declaration.can_declare(&with_cards(&hand, &three)));
+            prop_assert!(declaration.is_held_in(&with_cards(&hand, &three)));
             let four = cards_of_rank(rank, Size::Four as usize);
             let declaration = Declaration::Accuso { rank, size: Size::Four };
-            prop_assert!(declaration.can_declare(&with_cards(&hand, &four)));
+            prop_assert!(declaration.is_held_in(&with_cards(&hand, &four)));
         }
 
         /// The napoli is declarable exactly when the hand holds the Ace, Two
@@ -313,36 +551,34 @@ mod tests {
         #[test]
         fn napoli_is_declarable_exactly_when_the_run_is_held(
             suit in suit_strategy(),
-            hand in hand_strategy(),
+            hand in cards_strategy(),
         ) {
             let held = napoli_cards(suit).iter().all(|card| hand.contains(card));
-            prop_assert_eq!(Declaration::Napoli(suit).can_declare(&hand), held);
+            prop_assert_eq!(Declaration::Napoli(suit).is_held_in(&hand), held);
         }
 
-        /// Three of a kind is declarable exactly when the rank is Three, Two
-        /// or Ace and the hand holds at least three cards of it.
+        /// Three of a kind is declarable exactly when the hand holds at least
+        /// three cards of its rank.
         #[test]
-        fn three_of_a_kind_needs_three_cards_of_a_declarable_rank(
-            rank in italian_rank_strategy(),
-            hand in hand_strategy(),
+        fn three_of_a_kind_needs_three_cards_of_its_rank(
+            rank in declarable_rank_strategy(),
+            hand in cards_strategy(),
         ) {
-            let expected = DECLARABLE_RANKS.contains(&rank)
-                && copies_of(&hand, rank) >= Size::Three as usize;
+            let expected = copies_of(&hand, rank) >= Size::Three as usize;
             let declaration = Declaration::Accuso { rank, size: Size::Three };
-            prop_assert_eq!(declaration.can_declare(&hand), expected);
+            prop_assert_eq!(declaration.is_held_in(&hand), expected);
         }
 
-        /// Four of a kind is declarable exactly when the rank is Three, Two
-        /// or Ace and the hand holds all four cards of it.
+        /// Four of a kind is declarable exactly when the hand holds all four
+        /// cards of its rank.
         #[test]
-        fn four_of_a_kind_needs_four_cards_of_a_declarable_rank(
-            rank in italian_rank_strategy(),
-            hand in hand_strategy(),
+        fn four_of_a_kind_needs_four_cards_of_its_rank(
+            rank in declarable_rank_strategy(),
+            hand in cards_strategy(),
         ) {
-            let expected = DECLARABLE_RANKS.contains(&rank)
-                && copies_of(&hand, rank) >= Size::Four as usize;
+            let expected = copies_of(&hand, rank) >= Size::Four as usize;
             let declaration = Declaration::Accuso { rank, size: Size::Four };
-            prop_assert_eq!(declaration.can_declare(&hand), expected);
+            prop_assert_eq!(declaration.is_held_in(&hand), expected);
         }
 
         /// Adding a card to a hand that holds a set never removes the ability
@@ -350,9 +586,9 @@ mod tests {
         #[test]
         fn adding_a_card_never_removes_a_declaration(
             suit in suit_strategy(),
-            rank in sample::select(DECLARABLE_RANKS.to_vec()),
-            hand in hand_strategy(),
-            extra in card_strategy(),
+            rank in declarable_rank_strategy(),
+            hand in cards_strategy(),
+            extra in tressette_card_strategy(),
         ) {
             let three = cards_of_rank(rank, Size::Three as usize);
             let four = cards_of_rank(rank, Size::Four as usize);
@@ -362,13 +598,29 @@ mod tests {
                 (Declaration::Accuso { rank, size: Size::Four }, four),
             ] {
                 let larger = with_cards(&with_cards(&hand, &set), &[extra]);
-                prop_assert!(declaration.can_declare(&larger));
+                prop_assert!(declaration.is_held_in(&larger));
             }
+        }
+
+        /// Accusi are made of the three strongest ranks of a suit, from the
+        /// strongest down.
+        #[test]
+        fn declarable_ranks_are_the_three_strongest(suit in suit_strategy()) {
+            let mut by_strength: Vec<_> = ItalianRank::ALL
+                .iter()
+                .map(|&rank| TressetteCard::new(rank, suit))
+                .collect();
+            by_strength.sort_by(|a, b| b.cmp(a));
+            let declarable: Vec<_> = DeclarableRank::ALL
+                .iter()
+                .map(|&rank| TressetteCard::new(rank.into(), suit))
+                .collect();
+            prop_assert_eq!(declarable, by_strength[..Size::Three as usize].to_vec());
         }
 
         /// The points depend only on the kind of declaration.
         #[test]
-        fn points_depend_only_on_the_kind(suit in suit_strategy(), rank in italian_rank_strategy()) {
+        fn points_depend_only_on_the_kind(suit in suit_strategy(), rank in declarable_rank_strategy()) {
             prop_assert_eq!(Declaration::Napoli(suit).points(), NAPOLI_POINTS);
             prop_assert_eq!(
                 Declaration::Accuso { rank, size: Size::Three }.points(),
@@ -380,6 +632,68 @@ mod tests {
             );
         }
 
+        /// A declaration in the window goes on exactly when the hand holds its
+        /// cards.
+        #[test]
+        fn a_declaration_goes_on_exactly_when_held(
+            hand in cards_strategy(),
+            declaration in declaration_strategy(),
+        ) {
+            let expected = if declaration.is_held_in(&hand) {
+                Ok(())
+            } else {
+                Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::NotHeld })
+            };
+            prop_assert_eq!(in_window(declaration).held(&hand).map(|_| ()), expected);
+        }
+
+        /// A held declaration goes on exactly when neither it nor an accuso of
+        /// its rank was already declared.
+        #[test]
+        fn a_declaration_goes_on_exactly_when_not_yet_made(
+            hand in cards_strategy(),
+            declaration in declaration_strategy(),
+            declared in declarations_strategy(),
+        ) {
+            let hand = with_cards(&hand, &cards_of(declaration));
+            let already = match declaration {
+                Declaration::Napoli(_) => declared.contains(&declaration),
+                Declaration::Accuso { rank, .. } => accuso_declared(&declared, rank),
+            };
+            let expected = if already {
+                Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::AlreadyDeclared })
+            } else {
+                Ok(())
+            };
+            let declared: Vec<_> = declared.into_iter().map(Declared).collect();
+            let held = in_window(declaration).held(&hand).expect("the hand holds its cards");
+            prop_assert_eq!(held.unmade(&declared).map(|_| ()), expected);
+        }
+
+        /// A held declaration not yet made is made, unless it's three of a
+        /// kind while the hand holds all four.
+        #[test]
+        fn three_of_a_kind_gives_way_to_four(
+            hand in cards_strategy(),
+            declaration in declaration_strategy(),
+        ) {
+            let hand = with_cards(&hand, &cards_of(declaration));
+            let replaced_by_four = matches!(
+                declaration,
+                Declaration::Accuso { rank, size: Size::Three } if copies_of(&hand, rank) == Size::Four as usize
+            );
+            let expected = if replaced_by_four {
+                Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::ReplacedByFour })
+            } else {
+                Ok(())
+            };
+            let unmade = in_window(declaration)
+                .held(&hand)
+                .and_then(|held| held.unmade(&[]))
+                .expect("the hand holds its cards, and nothing was declared");
+            prop_assert_eq!(unmade.declare().map(|_| ()), expected);
+        }
+
         /// The first-trick window allows exactly trick 1.
         #[test]
         fn first_trick_window_allows_only_trick_one(trick in 1..=HAND_SIZE) {
@@ -388,11 +702,31 @@ mod tests {
 
         /// The first-three-tricks window allows exactly tricks 1 to 3.
         #[test]
-        fn first_three_tricks_window_allows_tricks_one_to_three(trick in 1..=HAND_SIZE) {
+        fn first_three_tricks_window_allows_tricks_one_to_three(trick in 0..=HAND_SIZE) {
             prop_assert_eq!(
                 Window::FirstThreeTricks.allows(trick),
-                trick <= LAST_TRICK_OF_FIRST_THREE
+                (1..=LAST_TRICK_OF_FIRST_THREE).contains(&trick)
             );
+        }
+
+        /// A declaration is proposed exactly on the tricks its window covers:
+        /// trick 1 for the first trick, tricks 1 to 3 for the first three.
+        #[test]
+        fn a_declaration_is_proposed_exactly_inside_the_window(
+            rules in rules_strategy(),
+            trick in 0..=HAND_SIZE,
+            declaration in declaration_strategy(),
+        ) {
+            let open = match rules.window {
+                Window::FirstTrick => trick == 1,
+                Window::FirstThreeTricks => (1..=3).contains(&trick),
+            };
+            let expected = if open {
+                Ok(())
+            } else {
+                Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::WindowClosed })
+            };
+            prop_assert_eq!(InWindow::new(declaration, rules, trick).map(|_| ()), expected);
         }
     }
 }
