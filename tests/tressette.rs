@@ -4,7 +4,7 @@
 use shuftlib::{
     cards::italian::{ItalianRank, Suit},
     engine::{Session, Viewer},
-    tressette::{Deal, Event, PerSeat, Seat, Tressette, TressetteCard},
+    tressette::{Config, Deal, Event, PerSeat, Seat, Tressette, TressetteCard},
 };
 
 #[test]
@@ -15,7 +15,7 @@ fn a_deal_made_with_real_cards_can_be_entered() {
             .map(|rank| TressetteCard::new(rank, suit))
             .collect::<Vec<_>>()
     };
-    let mut session = Session::<Tressette>::new(());
+    let mut session = Session::<Tressette>::new(Config::default());
     session
         .resolve_chance_with(Deal {
             dealer: Seat::East,

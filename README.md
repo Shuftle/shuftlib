@@ -30,12 +30,12 @@ use std::error::Error;
 
 use shuftlib::{
     engine::{Observation, Session, Status},
-    tressette::Tressette,
+    tressette::{Config, Tressette},
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut rng = rand::rng();
-    let mut session = Session::<Tressette>::new(());
+    let mut session = Session::<Tressette>::new(Config::default());
     let outcome = loop {
         match session.status() {
             // Waiting for a chance outcome: a new hand must be dealt.
@@ -56,7 +56,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("{:?} won {:?}", outcome.winner, outcome.score);
 
     // The log holds every deal and every card played: it replays on its own.
-    let replay = Session::<Tressette>::replay((), session.log().to_vec())?;
+    let replay = Session::<Tressette>::replay(Config::default(), session.log().to_vec())?;
     assert_eq!(replay, session);
     Ok(())
 }
