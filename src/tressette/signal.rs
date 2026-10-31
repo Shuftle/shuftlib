@@ -25,6 +25,79 @@ pub enum Signal {
     Ribusso,
 }
 
+impl Signal {
+    /// Every signal there is.
+    pub const ALL: [Self; 5] = [
+        Self::Volo,
+        Self::Altra,
+        Self::Striscio,
+        Self::Busso,
+        Self::Ribusso,
+    ];
+}
+
+/// The signals a variant allows. The default allows none: the game is played
+/// without signals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Rules {
+    volo: bool,
+    altra: bool,
+    striscio: bool,
+    busso: bool,
+    ribusso: bool,
+}
+
+impl Rules {
+    /// Returns these rules with `signal` allowed as well.
+    pub fn allow(mut self, signal: Signal) -> Self {
+        *self.flag(signal) = true;
+        self
+    }
+
+    /// Returns whether `signal` is allowed.
+    pub fn allows(mut self, signal: Signal) -> bool {
+        *self.flag(signal)
+    }
+
+    /// Returns whether no signal is allowed: the game is played without them.
+    pub fn is_muto(self) -> bool {
+        self == Self::default()
+    }
+
+    /// Returns the flag that says whether `signal` is allowed.
+    fn flag(&mut self, signal: Signal) -> &mut bool {
+        match signal {
+            Signal::Volo => &mut self.volo,
+            Signal::Altra => &mut self.altra,
+            Signal::Striscio => &mut self.striscio,
+            Signal::Busso => &mut self.busso,
+            Signal::Ribusso => &mut self.ribusso,
+        }
+    }
+}
+
+/// Why a signal can't be given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+pub enum SignalRefusal {
+    /// The variant allows no signals: the game is played without them.
+    #[error("the game is played without signals")]
+    Muto,
+    /// The variant allows other signals, but not this one.
+    #[error("this variant doesn't allow it")]
+    NotAllowed,
+    /// The leader's hand doesn't match it.
+    #[error("the hand doesn't match it")]
+    HandDoesntMatch,
+}
+
+/// What a leader's signal is read against.
+pub(super) struct Context<'a> {
+    /// The signals the variant allows.
+    pub rules: Rules,
+    /// The leader's cards before it leads.
+    pub hand: &'a [TressetteCard],
+}
+
 /// The card that opens a trick, with the signal given alongside it. It can
 /// only be built from a hand that matches the signal, so every `Lead` is
 /// honest.
@@ -35,13 +108,22 @@ pub struct Lead {
 }
 
 impl Lead {
-    /// Reads `signal` on `card` against `hand`, the leader's cards before it
-    /// leads, or says why the signal is false.
+    /// Reads `signal` on `card` against `context`, or says why it can't be
+    /// given.
     pub(super) fn parse(
         card: TressetteCard,
         signal: Signal,
-        hand: &[TressetteCard],
+        context: &Context,
     ) -> Result<Self, Error> {
+        if !context.rules.allows(signal) {
+            let reason = if context.rules.is_muto() {
+                SignalRefusal::Muto
+            } else {
+                SignalRefusal::NotAllowed
+            };
+            return Err(Error::CannotSignal { signal, reason });
+        }
+        let hand = context.hand;
         let ace = TressetteCard::new(ItalianRank::Ace, card.suit());
         let (others, all_low) = hand
             .iter()
@@ -63,14 +145,37 @@ impl Lead {
         if matches {
             Ok(Self { card, signal })
         } else {
-            Err(Error::FalseSignal { signal })
+            Err(Error::CannotSignal {
+                signal,
+                reason: SignalRefusal::HandDoesntMatch,
+            })
         }
     }
 }
 
 #[cfg(test)]
+/// Test utilities for the signal module.
+pub mod test_utils {
+    use super::Signal;
+    use proptest::{prelude::*, sample};
+
+    /// Generates any signal.
+    pub fn signal_strategy() -> impl Strategy<Value = Signal> {
+        sample::select(Signal::ALL.to_vec())
+    }
+
+    /// Generates any set of distinct signals.
+    pub fn signals_strategy() -> impl Strategy<Value = Vec<Signal>> {
+        sample::subsequence(Signal::ALL.to_vec(), 0..=Signal::ALL.len())
+    }
+}
+
+#[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        test_utils::{signal_strategy, signals_strategy},
+        *,
+    };
     use crate::cards::italian::ItalianRank;
     use crate::tressette::test_utils::hand_strategy;
     use proptest::{prelude::*, sample::Index};
@@ -83,6 +188,14 @@ mod tests {
             .collect()
     }
 
+    /// A context for `hand` in which every signal is allowed.
+    fn any_signal(hand: &[TressetteCard]) -> Context<'_> {
+        Context {
+            rules: Signal::ALL.into_iter().fold(Rules::default(), Rules::allow),
+            hand,
+        }
+    }
+
     proptest! {
         /// Volo is true exactly when the leader holds no other card of the
         /// suit led.
@@ -93,7 +206,7 @@ mod tests {
         ) {
             let lead = *pick.get(&hand);
             let expected = same_suit(&hand, lead).is_empty();
-            prop_assert_eq!(Lead::parse(lead, Signal::Volo, &hand).is_ok(), expected);
+            prop_assert_eq!(Lead::parse(lead, Signal::Volo, &any_signal(&hand)).is_ok(), expected);
         }
 
         /// Altra is true exactly when the leader holds one other card of the
@@ -107,7 +220,7 @@ mod tests {
             let same_suit = same_suit(&hand, lead);
             let ace = TressetteCard::new(ItalianRank::Ace, lead.suit());
             let expected = same_suit.len() == 1 && same_suit[0] < ace;
-            prop_assert_eq!(Lead::parse(lead, Signal::Altra, &hand).is_ok(), expected);
+            prop_assert_eq!(Lead::parse(lead, Signal::Altra, &any_signal(&hand)).is_ok(), expected);
         }
 
         /// Striscio is true exactly when the leader holds two or more other
@@ -121,14 +234,14 @@ mod tests {
             let ace = TressetteCard::new(ItalianRank::Ace, lead.suit());
             let same_suit = same_suit(&hand, lead);
             let expected = same_suit.len() >= 2 && same_suit.iter().all(|card| *card < ace);
-            prop_assert_eq!(Lead::parse(lead, Signal::Striscio, &hand).is_ok(), expected);
+            prop_assert_eq!(Lead::parse(lead, Signal::Striscio, &any_signal(&hand)).is_ok(), expected);
         }
 
         /// Busso asks for the partner's best card, so any lead may give it.
         #[test]
         fn busso_is_always_true(hand in hand_strategy(), pick in any::<Index>()) {
             let lead = *pick.get(&hand);
-            prop_assert!(Lead::parse(lead, Signal::Busso, &hand).is_ok());
+            prop_assert!(Lead::parse(lead, Signal::Busso, &any_signal(&hand)).is_ok());
         }
 
         /// Ribusso is true exactly when the leader keeps the Two of the suit led
@@ -146,7 +259,34 @@ mod tests {
                 && hand.contains(&two)
                 && !hand.contains(&three)
                 && !hand.contains(&ace);
-            prop_assert_eq!(Lead::parse(lead, Signal::Ribusso, &hand).is_ok(), expected);
+            prop_assert_eq!(Lead::parse(lead, Signal::Ribusso, &any_signal(&hand)).is_ok(), expected);
+        }
+
+        /// A signal can be given exactly when the rules allow it and the hand
+        /// matches it, and a refusal says which of the two failed, the rules
+        /// first, telling a game without signals from a signal left out.
+        #[test]
+        fn a_signal_is_given_exactly_when_allowed_and_true(
+            hand in hand_strategy(),
+            pick in any::<Index>(),
+            signal in signal_strategy(),
+            allowed in signals_strategy(),
+        ) {
+            let lead = *pick.get(&hand);
+            let rules = allowed.iter().copied().fold(Rules::default(), Rules::allow);
+            let matches_hand = Lead::parse(lead, signal, &any_signal(&hand)).is_ok();
+            let refused = |reason| Err(Error::CannotSignal { signal, reason });
+            let expected = if allowed.is_empty() {
+                refused(SignalRefusal::Muto)
+            } else if !allowed.contains(&signal) {
+                refused(SignalRefusal::NotAllowed)
+            } else if matches_hand {
+                Ok(())
+            } else {
+                refused(SignalRefusal::HandDoesntMatch)
+            };
+            let context = Context { rules, hand: &hand };
+            prop_assert_eq!(Lead::parse(lead, signal, &context).map(|_| ()), expected);
         }
     }
 }

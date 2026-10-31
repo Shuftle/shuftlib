@@ -80,7 +80,7 @@ mod trick;
 
 pub use card::TressetteCard;
 use declaration::Declaration;
-use signal::Signal;
+use signal::{Signal, SignalRefusal};
 pub use table::{PerSeat, PerTeam, Seat, Team};
 pub use trick::{CompletedTrick, Trick};
 
@@ -342,11 +342,13 @@ pub enum Error {
         /// The declaration attempted.
         declaration: Declaration,
     },
-    /// The leader's hand doesn't match the signal.
-    #[error("the hand doesn't match {signal:?}")]
-    FalseSignal {
+    /// The signal can't be given with this lead.
+    #[error("{signal:?} can't be given: {reason}")]
+    CannotSignal {
         /// The signal given.
         signal: Signal,
+        /// Why it can't be given.
+        reason: SignalRefusal,
     },
 }
 
