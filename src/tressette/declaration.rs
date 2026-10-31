@@ -16,9 +16,31 @@ pub const THREE_OF_A_KIND_POINTS: u8 = 3;
 /// Points for four cards of one rank.
 pub const FOUR_OF_A_KIND_POINTS: u8 = 4;
 
-/// The ranks that can be declared as a set.
-pub const DECLARABLE_RANKS: [ItalianRank; 3] =
-    [ItalianRank::Three, ItalianRank::Two, ItalianRank::Ace];
+/// A rank that can be declared as a set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DeclarableRank {
+    /// Threes.
+    Three,
+    /// Twos.
+    Two,
+    /// Aces.
+    Ace,
+}
+
+impl DeclarableRank {
+    /// Every rank that can be declared as a set.
+    pub const ALL: [Self; 3] = [Self::Three, Self::Two, Self::Ace];
+}
+
+impl From<DeclarableRank> for ItalianRank {
+    fn from(rank: DeclarableRank) -> Self {
+        match rank {
+            DeclarableRank::Three => Self::Three,
+            DeclarableRank::Two => Self::Two,
+            DeclarableRank::Ace => Self::Ace,
+        }
+    }
+}
 
 /// The ranks that make up a napoli, in any suit.
 const NAPOLI_RANKS: [ItalianRank; 3] = [ItalianRank::Ace, ItalianRank::Two, ItalianRank::Three];
@@ -40,7 +62,7 @@ pub enum Declaration {
     /// Three or four cards of one declarable rank.
     Accuso {
         /// The rank of the cards.
-        rank: ItalianRank,
+        rank: DeclarableRank,
         /// How many cards of that rank.
         size: Size,
     },
@@ -64,22 +86,21 @@ impl Declaration {
     /// four of a kind of each declarable rank.
     pub fn all() -> impl Iterator<Item = Self> {
         let napoli = Suit::ALL.into_iter().map(Self::Napoli);
-        let accusi = DECLARABLE_RANKS
+        let accusi = DeclarableRank::ALL
             .into_iter()
             .flat_map(|rank| [Size::Three, Size::Four].map(|size| Self::Accuso { rank, size }));
         napoli.chain(accusi)
     }
 
-    /// Returns whether `hand` holds every card this declaration needs, and
-    /// the rank is one that can be declared.
+    /// Returns whether `hand` holds every card this declaration needs.
     pub fn can_declare(&self, hand: &[TressetteCard]) -> bool {
         match *self {
             Self::Napoli(suit) => NAPOLI_RANKS
                 .iter()
                 .all(|&rank| hand.contains(&TressetteCard::new(rank, suit))),
             Self::Accuso { rank, size } => {
-                DECLARABLE_RANKS.contains(&rank)
-                    && hand.iter().filter(|card| card.rank() == rank).count() >= size as usize
+                let rank = ItalianRank::from(rank);
+                hand.iter().filter(|card| card.rank() == rank).count() >= size as usize
             }
         }
     }
@@ -159,14 +180,13 @@ pub struct Rules {
 #[cfg(test)]
 /// Test utilities for the declaration module.
 pub mod test_utils {
-    use super::{DECLARABLE_RANKS, Declaration, Rules, Visibility, Window};
-    use crate::cards::italian::ItalianRank;
+    use super::{DeclarableRank, Declaration, Rules, Visibility, Window};
     use crate::tressette::PerSeat;
     use proptest::{prelude::*, sample};
 
     /// Generates any rank that can be declared as a set.
-    pub fn declarable_rank_strategy() -> impl Strategy<Value = ItalianRank> {
-        sample::select(DECLARABLE_RANKS.to_vec())
+    pub fn declarable_rank_strategy() -> impl Strategy<Value = DeclarableRank> {
+        sample::select(DeclarableRank::ALL.to_vec())
     }
 
     /// Generates any set of distinct declarations, whether or not they could
@@ -208,7 +228,7 @@ mod tests {
         test_utils::{declarable_rank_strategy, declarations_strategy},
         *,
     };
-    use crate::cards::italian::test_utils::{italian_rank_strategy, suit_strategy};
+    use crate::cards::italian::test_utils::suit_strategy;
     use crate::tressette::{
         HAND_SIZE,
         card::test_utils::{cards_strategy, tressette_card_strategy},
@@ -235,20 +255,22 @@ mod tests {
     }
 
     /// The first `count` cards of `rank`, one per suit.
-    fn cards_of_rank(rank: ItalianRank, count: usize) -> Vec<TressetteCard> {
+    fn cards_of_rank(rank: DeclarableRank, count: usize) -> Vec<TressetteCard> {
         Suit::ALL
             .iter()
             .take(count)
-            .map(|&suit| TressetteCard::new(rank, suit))
+            .map(|&suit| TressetteCard::new(rank.into(), suit))
             .collect()
     }
 
-    fn copies_of(hand: &[TressetteCard], rank: ItalianRank) -> usize {
-        hand.iter().filter(|card| card.rank() == rank).count()
+    fn copies_of(hand: &[TressetteCard], rank: DeclarableRank) -> usize {
+        hand.iter()
+            .filter(|card| card.rank() == ItalianRank::from(rank))
+            .count()
     }
 
     /// Returns whether `declared` holds an accuso of `rank`, of either size.
-    fn accuso_declared(declared: &[Declaration], rank: ItalianRank) -> bool {
+    fn accuso_declared(declared: &[Declaration], rank: DeclarableRank) -> bool {
         declared
             .iter()
             .any(|declaration| matches!(declaration, Declaration::Accuso { rank: declared, .. } if *declared == rank))
@@ -344,28 +366,26 @@ mod tests {
             prop_assert_eq!(Declaration::Napoli(suit).can_declare(&hand), held);
         }
 
-        /// Three of a kind is declarable exactly when the rank is Three, Two
-        /// or Ace and the hand holds at least three cards of it.
+        /// Three of a kind is declarable exactly when the hand holds at least
+        /// three cards of its rank.
         #[test]
-        fn three_of_a_kind_needs_three_cards_of_a_declarable_rank(
-            rank in italian_rank_strategy(),
+        fn three_of_a_kind_needs_three_cards_of_its_rank(
+            rank in declarable_rank_strategy(),
             hand in cards_strategy(),
         ) {
-            let expected = DECLARABLE_RANKS.contains(&rank)
-                && copies_of(&hand, rank) >= Size::Three as usize;
+            let expected = copies_of(&hand, rank) >= Size::Three as usize;
             let declaration = Declaration::Accuso { rank, size: Size::Three };
             prop_assert_eq!(declaration.can_declare(&hand), expected);
         }
 
-        /// Four of a kind is declarable exactly when the rank is Three, Two
-        /// or Ace and the hand holds all four cards of it.
+        /// Four of a kind is declarable exactly when the hand holds all four
+        /// cards of its rank.
         #[test]
-        fn four_of_a_kind_needs_four_cards_of_a_declarable_rank(
-            rank in italian_rank_strategy(),
+        fn four_of_a_kind_needs_four_cards_of_its_rank(
+            rank in declarable_rank_strategy(),
             hand in cards_strategy(),
         ) {
-            let expected = DECLARABLE_RANKS.contains(&rank)
-                && copies_of(&hand, rank) >= Size::Four as usize;
+            let expected = copies_of(&hand, rank) >= Size::Four as usize;
             let declaration = Declaration::Accuso { rank, size: Size::Four };
             prop_assert_eq!(declaration.can_declare(&hand), expected);
         }
@@ -391,9 +411,25 @@ mod tests {
             }
         }
 
+        /// Accusi are made of the three strongest ranks of a suit, from the
+        /// strongest down.
+        #[test]
+        fn declarable_ranks_are_the_three_strongest(suit in suit_strategy()) {
+            let mut by_strength: Vec<_> = ItalianRank::ALL
+                .iter()
+                .map(|&rank| TressetteCard::new(rank, suit))
+                .collect();
+            by_strength.sort_by(|a, b| b.cmp(a));
+            let declarable: Vec<_> = DeclarableRank::ALL
+                .iter()
+                .map(|&rank| TressetteCard::new(rank.into(), suit))
+                .collect();
+            prop_assert_eq!(declarable, by_strength[..Size::Three as usize].to_vec());
+        }
+
         /// The points depend only on the kind of declaration.
         #[test]
-        fn points_depend_only_on_the_kind(suit in suit_strategy(), rank in italian_rank_strategy()) {
+        fn points_depend_only_on_the_kind(suit in suit_strategy(), rank in declarable_rank_strategy()) {
             prop_assert_eq!(Declaration::Napoli(suit).points(), NAPOLI_POINTS);
             prop_assert_eq!(
                 Declaration::Accuso { rank, size: Size::Three }.points(),
