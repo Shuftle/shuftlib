@@ -84,10 +84,10 @@ mod trick;
 
 pub use card::TressetteCard;
 use declaration::{Declaration, DeclarationRefusal, Declared};
-use signal::{Lead, Signal, SignalRefusal};
+use signal::{Signal, SignalRefusal};
 pub use table::{PerSeat, PerTeam, Seat, Team};
+use trick::Held;
 pub use trick::{CompletedTrick, Trick};
-use trick::{Opening, Play};
 
 /// The score a team needs to win, provided it's ahead.
 pub const SCORE_TO_WIN: u8 = 31;
@@ -231,10 +231,9 @@ impl Hand {
     }
 
     /// Returns what a signal by `seat` is read against, under `rules`.
-    fn signal_context(&self, rules: signal::Signals, seat: Seat) -> signal::Context<'_> {
+    fn signal_context(&self, rules: signal::Signals, seat: Seat) -> signal::Context {
         signal::Context {
             rules,
-            hand: &self.cards[seat],
             signalled: self.signalled[seat],
             led: self.led,
         }
@@ -485,7 +484,11 @@ impl View {
                 .hand
                 .iter()
                 .copied()
-                .filter(|&card| Play::new(card, &self.hand, trick).is_ok())
+                .filter(|&card| {
+                    Held::new(card, &self.hand)
+                        .and_then(|held| held.follow(trick))
+                        .is_ok()
+                })
                 .collect(),
             _ => Vec::new(),
         }
@@ -608,10 +611,14 @@ impl Game for Tressette {
         };
         let seat = turn.seat();
         let (play, lead) = match action {
-            Action::Play(card) => (Play::new(card, &hand.cards[seat], &hand.trick)?, None),
+            Action::Play(card) => (
+                Held::new(card, &hand.cards[seat])?.follow(&hand.trick)?,
+                None,
+            ),
             Action::Declare(declaration) => {
                 let rules = self.config.declarations;
-                let made = Declared::new(declaration, &hand.declaration_context(rules, seat))?;
+                let made =
+                    declaration::declare(declaration, &hand.declaration_context(rules, seat))?;
                 hand.declared[seat].push(made);
                 let mut events = Events::new();
                 events.public(Event::Declared {
@@ -623,8 +630,8 @@ impl Game for Tressette {
                 return Ok(events);
             }
             Action::Lead { card, signal } => {
-                let opening = Opening::new(card, &hand.cards[seat], &hand.trick)?;
-                let lead = Lead::new(
+                let opening = Held::new(card, &hand.cards[seat])?.open(&hand.trick)?;
+                let lead = signal::lead(
                     opening,
                     signal,
                     &hand.signal_context(self.config.signals, seat),
@@ -746,10 +753,14 @@ impl Game for Tressette {
                 declaration::allowed(&hand.declaration_context(self.config.declarations, seat))
             }),
             leads: to_act.map_or(Vec::new(), |(hand, seat)| {
-                signal::allowed(&hand.signal_context(self.config.signals, seat), &hand.trick)
-                    .into_iter()
-                    .map(|lead| (lead.card(), lead.signal()))
-                    .collect()
+                signal::allowed(
+                    &hand.signal_context(self.config.signals, seat),
+                    &hand.cards[seat],
+                    &hand.trick,
+                )
+                .into_iter()
+                .map(|lead| (lead.card(), lead.signal()))
+                .collect()
             }),
         }
     }
@@ -1373,7 +1384,6 @@ mod tests {
         let held = &hand.cards[seat];
         let context = signal::Context {
             rules: config.signals,
-            hand: held,
             signalled,
             led,
         };
@@ -1383,8 +1393,9 @@ mod tests {
             .flat_map(|&card| Signal::ALL.map(|signal| (card, signal)))
             .filter(|&(card, signal)| {
                 leading
-                    && Opening::new(card, held, &hand.trick)
-                        .and_then(|opening| Lead::new(opening, signal, &context))
+                    && Held::new(card, held)
+                        .and_then(|card| card.open(&hand.trick))
+                        .and_then(|opening| signal::lead(opening, signal, &context))
                         .is_ok()
             })
             .collect();

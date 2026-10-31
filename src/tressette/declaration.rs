@@ -139,35 +139,60 @@ pub(super) struct Context<'a> {
     pub declared: &'a [Declared],
 }
 
-/// A declaration a seat made, as the rules allowed it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct Declared(Declaration);
+/// Returns `declaration` refused for `reason`.
+fn refused(declaration: Declaration, reason: DeclarationRefusal) -> Error {
+    Error::CannotDeclare {
+        declaration,
+        reason,
+    }
+}
 
-impl Declared {
-    /// Returns the declaration made.
-    pub(crate) fn declaration(self) -> Declaration {
-        self.0
+/// A declaration proposed on a trick the variant allows declarations on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct InWindow(Declaration);
+
+impl InWindow {
+    /// Builds `declaration` as proposed on the 1-based `trick` under `rules`,
+    /// or returns that the window is closed.
+    pub(crate) fn new(
+        declaration: Declaration,
+        rules: Declarations,
+        trick: usize,
+    ) -> Result<Self, Error> {
+        if rules.window.allows(trick) {
+            Ok(Self(declaration))
+        } else {
+            Err(refused(declaration, DeclarationRefusal::WindowClosed))
+        }
     }
 
-    /// Builds `declaration` as made in `context`, or returns why it can't
-    /// be made: when several reasons apply, the first of
-    /// [`WindowClosed`](DeclarationRefusal::WindowClosed),
-    /// [`NotHeld`](DeclarationRefusal::NotHeld),
-    /// [`AlreadyDeclared`](DeclarationRefusal::AlreadyDeclared) and
-    /// [`ReplacedByFour`](DeclarationRefusal::ReplacedByFour).
-    pub(super) fn new(declaration: Declaration, context: &Context) -> Result<Self, Error> {
-        let refused = |reason| Error::CannotDeclare {
-            declaration,
-            reason,
-        };
-        if !context.rules.window.allows(context.trick) {
-            return Err(refused(DeclarationRefusal::WindowClosed));
+    /// Checks the declaration against `hand`, or returns that the hand
+    /// doesn't hold its cards.
+    pub(crate) fn held(self, hand: &[TressetteCard]) -> Result<HeldDeclaration<'_>, Error> {
+        if self.0.can_declare(hand) {
+            Ok(HeldDeclaration {
+                declaration: self.0,
+                hand,
+            })
+        } else {
+            Err(refused(self.0, DeclarationRefusal::NotHeld))
         }
-        if !declaration.can_declare(context.hand) {
-            return Err(refused(DeclarationRefusal::NotHeld));
-        }
-        let already = context
-            .declared
+    }
+}
+
+/// A declaration in the window whose cards the seat holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct HeldDeclaration<'a> {
+    declaration: Declaration,
+    hand: &'a [TressetteCard],
+}
+
+impl<'a> HeldDeclaration<'a> {
+    /// Checks the declaration against what the seat already `declared`, or
+    /// returns that it, or an accuso of its rank, was already made.
+    pub(crate) fn unmade(self, declared: &[Declared]) -> Result<Unmade<'a>, Error> {
+        let declaration = self.declaration;
+        let already = declared
             .iter()
             .any(|&Declared(made)| match (declaration, made) {
                 (Declaration::Napoli(_), _) => made == declaration,
@@ -177,8 +202,22 @@ impl Declared {
                 (Declaration::Accuso { .. }, Declaration::Napoli(_)) => false,
             });
         if already {
-            return Err(refused(DeclarationRefusal::AlreadyDeclared));
+            Err(refused(declaration, DeclarationRefusal::AlreadyDeclared))
+        } else {
+            Ok(Unmade(self))
         }
+    }
+}
+
+/// A held declaration in the window that the seat hasn't made yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Unmade<'a>(HeldDeclaration<'a>);
+
+impl Unmade<'_> {
+    /// Makes the declaration, or returns that it's three of a kind while
+    /// the hand holds all four.
+    pub(crate) fn declare(self) -> Result<Declared, Error> {
+        let HeldDeclaration { declaration, hand } = self.0;
         if let Declaration::Accuso {
             rank,
             size: Size::Three,
@@ -187,12 +226,32 @@ impl Declared {
                 rank,
                 size: Size::Four,
             })
-            .can_declare(context.hand)
+            .can_declare(hand)
         {
-            return Err(refused(DeclarationRefusal::ReplacedByFour));
+            return Err(refused(declaration, DeclarationRefusal::ReplacedByFour));
         }
-        Ok(Self(declaration))
+        Ok(Declared(declaration))
     }
+}
+
+/// A declaration a seat made, as the rules allowed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Declared(Declaration);
+
+impl Declared {
+    /// Returns the declaration made.
+    pub(crate) fn declaration(self) -> Declaration {
+        self.0
+    }
+}
+
+/// Makes `declaration` in `context`, through each rule a declaration must
+/// meet.
+pub(super) fn declare(declaration: Declaration, context: &Context) -> Result<Declared, Error> {
+    InWindow::new(declaration, context.rules, context.trick)?
+        .held(context.hand)?
+        .unmade(context.declared)?
+        .declare()
 }
 
 /// Why a declaration can't be made.
@@ -220,7 +279,7 @@ pub enum DeclarationRefusal {
 /// of a rank, only the four may be declared.
 pub(super) fn allowed(context: &Context) -> Vec<Declaration> {
     Declaration::all()
-        .filter(|&declaration| Declared::new(declaration, context).is_ok())
+        .filter(|&declaration| declare(declaration, context).is_ok())
         .collect()
 }
 
@@ -385,6 +444,20 @@ mod tests {
             hand,
             declared: &declared,
         })
+    }
+
+    /// Returns `declaration` proposed on the first trick, which every window
+    /// allows.
+    fn in_window(declaration: Declaration) -> InWindow {
+        InWindow::new(declaration, Declarations::default(), 1).expect("the window is open")
+    }
+
+    /// Returns the cards `declaration` is made of.
+    fn cards_of(declaration: Declaration) -> Vec<TressetteCard> {
+        match declaration {
+            Declaration::Napoli(suit) => napoli_cards(suit),
+            Declaration::Accuso { rank, size } => cards_of_rank(rank, size as usize),
+        }
     }
 
     /// Returns whether `declared` holds an accuso of `rank`, of either size.
@@ -559,57 +632,82 @@ mod tests {
             );
         }
 
-        /// Outside the tricks the rules allow, no declaration can be made,
-        /// whatever the hand holds.
+        /// A declaration can be proposed exactly on the tricks the rules
+        /// allow.
         #[test]
-        fn no_declaration_is_made_outside_the_window(
+        fn a_declaration_is_proposed_exactly_inside_the_window(
             rules in rules_strategy(),
-            trick in 1..=HAND_SIZE,
-            hand in cards_strategy(),
+            trick in 0..=HAND_SIZE,
             declaration in declaration_strategy(),
-            declared in declarations_strategy(),
         ) {
-            prop_assume!(!rules.window.allows(trick));
-            let declared: Vec<_> = declared.into_iter().map(Declared).collect();
-            let context = Context { rules, trick, hand: &hand, declared: &declared };
-            prop_assert_eq!(
-                Declared::new(declaration, &context).map(|_| ()),
+            let expected = if rules.window.allows(trick) {
+                Ok(())
+            } else {
                 Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::WindowClosed })
-            );
+            };
+            prop_assert_eq!(InWindow::new(declaration, rules, trick).map(|_| ()), expected);
         }
 
-        /// On the first trick, a declaration is made exactly when held and not
-        /// yet made, three of a kind giving way to four; a refusal names the
-        /// first rule broken.
+        /// A declaration in the window goes on exactly when the hand holds its
+        /// cards.
         #[test]
-        fn a_declaration_is_made_exactly_when_held_and_free(
-            rules in rules_strategy(),
+        fn a_declaration_goes_on_exactly_when_held(
+            hand in cards_strategy(),
+            declaration in declaration_strategy(),
+        ) {
+            let expected = if declaration.can_declare(&hand) {
+                Ok(())
+            } else {
+                Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::NotHeld })
+            };
+            prop_assert_eq!(in_window(declaration).held(&hand).map(|_| ()), expected);
+        }
+
+        /// A held declaration goes on exactly when neither it nor an accuso of
+        /// its rank was already declared.
+        #[test]
+        fn a_declaration_goes_on_exactly_when_not_yet_made(
             hand in cards_strategy(),
             declaration in declaration_strategy(),
             declared in declarations_strategy(),
         ) {
-            let trick = 1;
-            let refused = |reason| Err(Error::CannotDeclare { declaration, reason });
+            let hand = with_cards(&hand, &cards_of(declaration));
             let already = match declaration {
                 Declaration::Napoli(_) => declared.contains(&declaration),
                 Declaration::Accuso { rank, .. } => accuso_declared(&declared, rank),
             };
-            let replaced_by_four = matches!(
-                declaration,
-                Declaration::Accuso { rank, size: Size::Three } if copies_of(&hand, rank) == Size::Four as usize
-            );
-            let expected = if !declaration.can_declare(&hand) {
-                refused(DeclarationRefusal::NotHeld)
-            } else if already {
-                refused(DeclarationRefusal::AlreadyDeclared)
-            } else if replaced_by_four {
-                refused(DeclarationRefusal::ReplacedByFour)
+            let expected = if already {
+                Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::AlreadyDeclared })
             } else {
                 Ok(())
             };
             let declared: Vec<_> = declared.into_iter().map(Declared).collect();
-            let context = Context { rules, trick, hand: &hand, declared: &declared };
-            prop_assert_eq!(Declared::new(declaration, &context).map(|_| ()), expected);
+            let held = in_window(declaration).held(&hand).expect("the hand holds its cards");
+            prop_assert_eq!(held.unmade(&declared).map(|_| ()), expected);
+        }
+
+        /// A held declaration not yet made is made, unless it's three of a
+        /// kind while the hand holds all four.
+        #[test]
+        fn three_of_a_kind_gives_way_to_four(
+            hand in cards_strategy(),
+            declaration in declaration_strategy(),
+        ) {
+            let hand = with_cards(&hand, &cards_of(declaration));
+            let replaced_by_four = matches!(
+                declaration,
+                Declaration::Accuso { rank, size: Size::Three } if copies_of(&hand, rank) == Size::Four as usize
+            );
+            let expected = if replaced_by_four {
+                Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::ReplacedByFour })
+            } else {
+                Ok(())
+            };
+            let unmade = in_window(declaration)
+                .held(&hand)
+                .and_then(|held| held.unmade(&[]))
+                .expect("the hand holds its cards, and nothing was declared");
+            prop_assert_eq!(unmade.declare().map(|_| ()), expected);
         }
 
         /// The first-trick window allows exactly trick 1.

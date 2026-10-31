@@ -157,31 +157,55 @@ fn plays<I: IntoIterator<Item = TressetteCard>>(
         .map(move |(turn, card)| (leader.after(turn), card))
 }
 
+/// A card a seat holds, with the hand it's in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Held<'a> {
+    card: TressetteCard,
+    hand: &'a [TressetteCard],
+}
+
+impl<'a> Held<'a> {
+    /// Builds `card` as held in `hand`, or returns that it isn't.
+    pub(crate) fn new(card: TressetteCard, hand: &'a [TressetteCard]) -> Result<Self, Error> {
+        if hand.contains(&card) {
+            Ok(Self { card, hand })
+        } else {
+            Err(Error::CardNotInHand { card })
+        }
+    }
+
+    /// Plays the card on `trick`, or returns that it must follow the led
+    /// suit.
+    pub(crate) fn follow(self, trick: &Trick) -> Result<Play, Error> {
+        if let Some(required) = trick.led_suit()
+            && self.card.suit() != required
+            && self.hand.iter().any(|held| held.suit() == required)
+        {
+            return Err(Error::MustFollowSuit {
+                card: self.card,
+                required,
+            });
+        }
+        Ok(Play(self.card))
+    }
+
+    /// Leads the card on `trick`, or returns that the trick has already been
+    /// led.
+    pub(crate) fn open(self, trick: &Trick) -> Result<Opening<'a>, Error> {
+        if trick.led_suit().is_some() {
+            Err(Error::NotLeading)
+        } else {
+            Ok(Opening(self))
+        }
+    }
+}
+
 /// A card a seat may play on the trick: it holds it, and it follows the led
 /// suit if it can.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Play(TressetteCard);
 
 impl Play {
-    /// Builds the play of `card` from `hand` on `trick`, or returns why it
-    /// can't be played.
-    pub(crate) fn new(
-        card: TressetteCard,
-        hand: &[TressetteCard],
-        trick: &Trick,
-    ) -> Result<Self, Error> {
-        if !hand.contains(&card) {
-            return Err(Error::CardNotInHand { card });
-        }
-        if let Some(required) = trick.led_suit()
-            && card.suit() != required
-            && hand.iter().any(|held| held.suit() == required)
-        {
-            return Err(Error::MustFollowSuit { card, required });
-        }
-        Ok(Self(card))
-    }
-
     /// Returns the card played.
     pub(crate) fn card(self) -> TressetteCard {
         self.0
@@ -190,33 +214,22 @@ impl Play {
 
 /// A card a seat leads: it holds it, and the trick has no card yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct Opening(TressetteCard);
+pub(crate) struct Opening<'a>(Held<'a>);
 
-impl Opening {
-    /// Builds the lead of `card` from `hand` on `trick`, or returns why it
-    /// can't be led.
-    pub(crate) fn new(
-        card: TressetteCard,
-        hand: &[TressetteCard],
-        trick: &Trick,
-    ) -> Result<Self, Error> {
-        if trick.led_suit().is_some() {
-            return Err(Error::NotLeading);
-        }
-        if !hand.contains(&card) {
-            return Err(Error::CardNotInHand { card });
-        }
-        Ok(Self(card))
-    }
-
+impl<'a> Opening<'a> {
     /// Returns the card led.
     pub(crate) fn card(self) -> TressetteCard {
-        self.0
+        self.0.card
+    }
+
+    /// Returns the leader's hand, the card led included.
+    pub(crate) fn hand(self) -> &'a [TressetteCard] {
+        self.0.hand
     }
 }
 
-impl From<Opening> for Play {
-    fn from(opening: Opening) -> Self {
+impl From<Opening<'_>> for Play {
+    fn from(opening: Opening<'_>) -> Self {
         Self(opening.card())
     }
 }
@@ -257,10 +270,7 @@ mod tests {
     };
     use crate::{
         cards::italian::ItalianRank,
-        tressette::{
-            card::test_utils::tressette_card_strategy, deck, table::test_utils::seat_strategy,
-            test_utils::hand_strategy,
-        },
+        tressette::{deck, table::test_utils::seat_strategy, test_utils::hand_strategy},
     };
 
     fn card(rank: ItalianRank, suit: Suit) -> TressetteCard {
@@ -305,33 +315,29 @@ mod tests {
             prop_assert_eq!(trick, Trick::new(completed.taker()));
         }
 
-        /// A card can be played exactly when the hand holds it and, if the
-        /// hand holds the led suit, it's of that suit; a refusal names the
-        /// first of these that fails.
+        /// A held card can be played exactly when it's of the led suit, or the
+        /// hand holds none of it.
         #[test]
-        fn a_card_is_played_exactly_when_held_and_following_suit(
+        fn a_held_card_is_played_exactly_when_it_follows_suit(
             hand in hand_strategy(),
             trick in trick_strategy(),
-            from_hand in any::<bool>(),
             pick in any::<sample::Index>(),
-            other in tressette_card_strategy(),
         ) {
             let hand: Vec<_> = hand
                 .into_iter()
                 .filter(|held| trick.plays().all(|(_, played)| played != *held))
                 .collect();
-            let card = if from_hand && !hand.is_empty() { *pick.get(&hand) } else { other };
+            prop_assume!(!hand.is_empty());
+            let card = *pick.get(&hand);
             let required = trick
                 .led_suit()
-                .filter(|&suit| hand.iter().any(|held| held.suit() == suit));
-            let expected = if !hand.contains(&card) {
-                Err(Error::CardNotInHand { card })
-            } else if let Some(required) = required.filter(|&suit| card.suit() != suit) {
-                Err(Error::MustFollowSuit { card, required })
-            } else {
-                Ok(())
+                .filter(|&suit| card.suit() != suit && hand.iter().any(|held| held.suit() == suit));
+            let expected = match required {
+                Some(required) => Err(Error::MustFollowSuit { card, required }),
+                None => Ok(()),
             };
-            prop_assert_eq!(Play::new(card, &hand, &trick).map(|_| ()), expected);
+            let held = Held::new(card, &hand).expect("the card is in the hand");
+            prop_assert_eq!(held.follow(&trick).map(|_| ()), expected);
         }
     }
 }

@@ -8,7 +8,7 @@ use crate::cards::italian::{ItalianRank, PerSuit};
 
 use super::{
     Error, TressetteCard, Trick,
-    trick::{Opening, Play},
+    trick::{Held, Opening, Play},
 };
 
 /// A signal the seat leading a trick may give with its card.
@@ -126,51 +126,90 @@ pub enum SignalRefusal {
     SuitAlreadyLed,
 }
 
-/// What a leader's signal is read against.
-pub(super) struct Context<'a> {
+/// What a leader's signal is read against, besides its hand.
+pub(super) struct Context {
     /// The signals the variant allows.
     pub rules: Signals,
-    /// The leader's cards before it leads.
-    pub hand: &'a [TressetteCard],
     /// The suits the leader already signalled in this hand.
     pub signalled: PerSuit<bool>,
     /// The suits that opened a trick so far this hand.
     pub led: PerSuit<bool>,
 }
 
-/// The card that opens a trick, with a signal the leader's hand matches.
+/// A signal the variant allows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct Lead {
-    opening: Opening,
-    signal: Signal,
+pub(crate) struct AllowedSignal(Signal);
+
+impl AllowedSignal {
+    /// Builds `signal` as allowed by `rules`, or returns why it isn't.
+    pub(crate) fn new(signal: Signal, rules: Signals) -> Result<Self, Error> {
+        if rules.allows(signal) {
+            return Ok(Self(signal));
+        }
+        let reason = if rules.is_muto() {
+            SignalRefusal::Muto
+        } else {
+            SignalRefusal::NotAllowed
+        };
+        Err(Error::CannotSignal { signal, reason })
+    }
 }
 
-impl Lead {
-    /// Builds the lead of `opening` with `signal` in `context`, or returns
-    /// why the signal can't be given.
-    pub(super) fn new(opening: Opening, signal: Signal, context: &Context) -> Result<Self, Error> {
-        let card = opening.card();
-        if !context.rules.allows(signal) {
-            let reason = if context.rules.is_muto() {
-                SignalRefusal::Muto
-            } else {
-                SignalRefusal::NotAllowed
-            };
-            return Err(Error::CannotSignal { signal, reason });
-        }
-        if context.signalled[card.suit()] {
+impl<'a> Opening<'a> {
+    /// Gives `allowed` with the lead, or returns that the leader already
+    /// signalled in its suit, as marked in `signalled`.
+    pub(crate) fn signal(
+        self,
+        allowed: AllowedSignal,
+        signalled: PerSuit<bool>,
+    ) -> Result<Unrepeated<'a>, Error> {
+        let signal = allowed.0;
+        if signalled[self.card().suit()] {
             return Err(Error::CannotSignal {
                 signal,
                 reason: SignalRefusal::AlreadySignalled,
             });
         }
-        if signal == Signal::Ribusso && context.led[card.suit()] {
+        Ok(Unrepeated {
+            opening: self,
+            signal,
+        })
+    }
+}
+
+/// An allowed signal on a lead, the first in its suit from this leader.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Unrepeated<'a> {
+    opening: Opening<'a>,
+    signal: Signal,
+}
+
+impl<'a> Unrepeated<'a> {
+    /// Checks the signal against the suits marked in `led`, or returns that
+    /// a ribusso comes after the suit's first lead.
+    pub(crate) fn timely(self, led: PerSuit<bool>) -> Result<Timely<'a>, Error> {
+        if self.signal == Signal::Ribusso && led[self.opening.card().suit()] {
             return Err(Error::CannotSignal {
-                signal,
+                signal: self.signal,
                 reason: SignalRefusal::SuitAlreadyLed,
             });
         }
-        let hand = context.hand;
+        Ok(Timely(self))
+    }
+}
+
+/// An unrepeated signal on a lead, given when the rules on earlier leads
+/// allow it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Timely<'a>(Unrepeated<'a>);
+
+impl Timely<'_> {
+    /// Builds the lead, or returns that the leader's hand doesn't match the
+    /// signal.
+    pub(crate) fn lead(self) -> Result<Lead, Error> {
+        let Unrepeated { opening, signal } = self.0;
+        let card = opening.card();
+        let hand = opening.hand();
         let ace = TressetteCard::new(ItalianRank::Ace, card.suit());
         let (others, all_low) = hand
             .iter()
@@ -190,7 +229,10 @@ impl Lead {
             }
         };
         if matches {
-            Ok(Self { opening, signal })
+            Ok(Lead {
+                play: opening.into(),
+                signal,
+            })
         } else {
             Err(Error::CannotSignal {
                 signal,
@@ -198,15 +240,24 @@ impl Lead {
             })
         }
     }
+}
 
+/// The card that opens a trick, with a signal the leader's hand matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Lead {
+    play: Play,
+    signal: Signal,
+}
+
+impl Lead {
     /// Returns the card led.
     pub(crate) fn card(&self) -> TressetteCard {
-        self.opening.card()
+        self.play.card()
     }
 
     /// Returns the card led, as a legal play.
     pub(crate) fn play(&self) -> Play {
-        self.opening.into()
+        self.play
     }
 
     /// Returns the signal given.
@@ -215,15 +266,25 @@ impl Lead {
     }
 }
 
-/// Returns every lead with a signal the leader may make on `trick` in
-/// `context`.
-pub(super) fn allowed(context: &Context, trick: &Trick) -> Vec<Lead> {
-    context
-        .hand
-        .iter()
-        .filter_map(|&card| Opening::new(card, context.hand, trick).ok())
+/// Builds the lead of `opening` with `signal` in `context`, through each
+/// rule a signal must meet.
+pub(super) fn lead(opening: Opening<'_>, signal: Signal, context: &Context) -> Result<Lead, Error> {
+    opening
+        .signal(
+            AllowedSignal::new(signal, context.rules)?,
+            context.signalled,
+        )?
+        .timely(context.led)?
+        .lead()
+}
+
+/// Returns every lead with a signal the seat holding `hand` may make on
+/// `trick` in `context`.
+pub(super) fn allowed(context: &Context, hand: &[TressetteCard], trick: &Trick) -> Vec<Lead> {
+    hand.iter()
+        .filter_map(|&card| Held::new(card, hand).and_then(|held| held.open(trick)).ok())
         .flat_map(|opening| Signal::ALL.map(|signal| (opening, signal)))
-        .filter_map(|(opening, signal)| Lead::new(opening, signal, context).ok())
+        .filter_map(|(opening, signal)| lead(opening, signal, context).ok())
         .collect()
 }
 
@@ -268,19 +329,22 @@ mod tests {
             .collect()
     }
 
-    /// A context for `hand` in which every signal is allowed.
-    fn any_signal(hand: &[TressetteCard]) -> Context<'_> {
-        Context {
-            rules: Signals::all(),
-            hand,
-            signalled: PerSuit::default(),
-            led: PerSuit::default(),
-        }
+    /// Returns `lead`, a card of `hand`, as the opening of an empty trick.
+    fn opening(lead: TressetteCard, hand: &[TressetteCard]) -> Opening<'_> {
+        Held::new(lead, hand)
+            .and_then(|held| held.open(&Trick::new(Seat::North)))
+            .expect("the lead is in the hand, and the trick is empty")
     }
 
-    /// Returns `lead`, a card of `hand`, as the opening of an empty trick.
-    fn opening(lead: TressetteCard, hand: &[TressetteCard]) -> Opening {
-        Opening::new(lead, hand, &Trick::new(Seat::North)).expect("the lead is in the hand")
+    /// Returns whether the leader holding `hand` may lead `lead` with
+    /// `signal` when every signal is allowed and none was given before.
+    fn matches(lead: TressetteCard, hand: &[TressetteCard], signal: Signal) -> bool {
+        let fresh = Context {
+            rules: Signals::all(),
+            signalled: PerSuit::default(),
+            led: PerSuit::default(),
+        };
+        super::lead(opening(lead, hand), signal, &fresh).is_ok()
     }
 
     proptest! {
@@ -293,7 +357,7 @@ mod tests {
         ) {
             let lead = *pick.get(&hand);
             let expected = same_suit(&hand, lead).is_empty();
-            prop_assert_eq!(Lead::new(opening(lead, &hand), Signal::Volo, &any_signal(&hand)).is_ok(), expected);
+            prop_assert_eq!(matches(lead, &hand, Signal::Volo), expected);
         }
 
         /// Altra is true exactly when the leader holds one other card of the
@@ -307,7 +371,7 @@ mod tests {
             let same_suit = same_suit(&hand, lead);
             let ace = TressetteCard::new(ItalianRank::Ace, lead.suit());
             let expected = same_suit.len() == 1 && same_suit[0] < ace;
-            prop_assert_eq!(Lead::new(opening(lead, &hand), Signal::Altra, &any_signal(&hand)).is_ok(), expected);
+            prop_assert_eq!(matches(lead, &hand, Signal::Altra), expected);
         }
 
         /// Striscio is true exactly when the leader holds two or more other
@@ -321,14 +385,14 @@ mod tests {
             let ace = TressetteCard::new(ItalianRank::Ace, lead.suit());
             let same_suit = same_suit(&hand, lead);
             let expected = same_suit.len() >= 2 && same_suit.iter().all(|card| *card < ace);
-            prop_assert_eq!(Lead::new(opening(lead, &hand), Signal::Striscio, &any_signal(&hand)).is_ok(), expected);
+            prop_assert_eq!(matches(lead, &hand, Signal::Striscio), expected);
         }
 
         /// Busso asks for the partner's best card, so any lead may give it.
         #[test]
         fn busso_is_always_true(hand in hand_strategy(), pick in any::<Index>()) {
             let lead = *pick.get(&hand);
-            prop_assert!(Lead::new(opening(lead, &hand), Signal::Busso, &any_signal(&hand)).is_ok());
+            prop_assert!(matches(lead, &hand, Signal::Busso));
         }
 
         /// Ribusso is true exactly when the leader keeps the Two of the suit led
@@ -346,7 +410,7 @@ mod tests {
                 && hand.contains(&two)
                 && !hand.contains(&three)
                 && !hand.contains(&ace);
-            prop_assert_eq!(Lead::new(opening(lead, &hand), Signal::Ribusso, &any_signal(&hand)).is_ok(), expected);
+            prop_assert_eq!(matches(lead, &hand, Signal::Ribusso), expected);
         }
 
         /// `only` allows exactly the signals it's given, `all` every one, and
@@ -361,40 +425,27 @@ mod tests {
             }
         }
 
-        /// A signal can be given exactly when the rules allow it and the hand
-        /// matches it, and a refusal says which of the two failed, the rules
-        /// first.
+        /// A signal is allowed exactly when the rules list it; refused, it
+        /// tells a game without signals from a signal left out.
         #[test]
-        fn a_signal_is_given_exactly_when_allowed_and_true(
-            hand in hand_strategy(),
-            pick in any::<Index>(),
+        fn a_signal_is_allowed_exactly_when_the_rules_list_it(
             signal in signal_strategy(),
             allowed in signals_strategy(),
         ) {
-            let lead = *pick.get(&hand);
-            let rules = Signals::only(allowed.iter().copied());
-            let matches_hand = Lead::new(opening(lead, &hand), signal, &any_signal(&hand)).is_ok();
             let refused = |reason| Err(Error::CannotSignal { signal, reason });
-            let expected = if allowed.is_empty() {
-                refused(SignalRefusal::Muto)
-            } else if !allowed.contains(&signal) {
-                refused(SignalRefusal::NotAllowed)
-            } else if matches_hand {
+            let expected = if allowed.contains(&signal) {
                 Ok(())
+            } else if allowed.is_empty() {
+                refused(SignalRefusal::Muto)
             } else {
-                refused(SignalRefusal::HandDoesntMatch)
+                refused(SignalRefusal::NotAllowed)
             };
-            let context = Context {
-                rules,
-                hand: &hand,
-                signalled: PerSuit::default(),
-                led: PerSuit::default(),
-            };
-            prop_assert_eq!(Lead::new(opening(lead, &hand), signal, &context).map(|_| ()), expected);
+            let rules = Signals::only(allowed);
+            prop_assert_eq!(AllowedSignal::new(signal, rules).map(|_| ()), expected);
         }
 
-        /// A leader that already signalled in the suit led can't signal in it
-        /// again; signals in other suits change nothing.
+        /// An allowed signal can be given on a lead exactly when the leader
+        /// hasn't signalled in its suit yet; other suits change nothing.
         #[test]
         fn a_seat_signals_once_per_suit(
             hand in hand_strategy(),
@@ -406,14 +457,15 @@ mod tests {
             let expected = if signalled[lead.suit()] {
                 Err(Error::CannotSignal { signal, reason: SignalRefusal::AlreadySignalled })
             } else {
-                Lead::new(opening(lead, &hand), signal, &any_signal(&hand)).map(|_| ())
+                Ok(())
             };
-            let context = Context { signalled, ..any_signal(&hand) };
-            prop_assert_eq!(Lead::new(opening(lead, &hand), signal, &context).map(|_| ()), expected);
+            let allowed = AllowedSignal::new(signal, Signals::all()).expect("every signal is allowed");
+            let given = opening(lead, &hand).signal(allowed, signalled);
+            prop_assert_eq!(given.map(|_| ()), expected);
         }
 
         /// Once a suit has been led, a ribusso can't be given in it; every
-        /// other signal, and ribusso in a suit not led yet, is unaffected.
+        /// other signal, and ribusso in a suit not led yet, is timely.
         #[test]
         fn ribusso_is_only_for_the_first_lead_of_a_suit(
             hand in hand_strategy(),
@@ -425,10 +477,13 @@ mod tests {
             let expected = if signal == Signal::Ribusso && led[lead.suit()] {
                 Err(Error::CannotSignal { signal, reason: SignalRefusal::SuitAlreadyLed })
             } else {
-                Lead::new(opening(lead, &hand), signal, &any_signal(&hand)).map(|_| ())
+                Ok(())
             };
-            let context = Context { led, ..any_signal(&hand) };
-            prop_assert_eq!(Lead::new(opening(lead, &hand), signal, &context).map(|_| ()), expected);
+            let allowed = AllowedSignal::new(signal, Signals::all()).expect("every signal is allowed");
+            let unrepeated = opening(lead, &hand)
+                .signal(allowed, PerSuit::default())
+                .expect("nothing was signalled yet");
+            prop_assert_eq!(unrepeated.timely(led).map(|_| ()), expected);
         }
     }
 }
