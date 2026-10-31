@@ -4,7 +4,7 @@
 //! Signals are never bluffs: a [`Lead`] only exists when the leader's hand
 //! matches its signal.
 
-use crate::cards::italian::ItalianRank;
+use crate::cards::italian::{ItalianRank, PerSuit};
 
 use super::{Error, TressetteCard, Trick, trick::Play};
 
@@ -91,6 +91,9 @@ pub enum SignalRefusal {
     /// The seat isn't leading the trick: only the leader may signal.
     #[error("only the seat leading the trick may signal")]
     NotLeading,
+    /// The leader already signalled in this suit this hand.
+    #[error("a signal was already given in this suit")]
+    AlreadySignalled,
 }
 
 /// What a leader's signal is read against.
@@ -101,6 +104,8 @@ pub(super) struct Context<'a> {
     pub hand: &'a [TressetteCard],
     /// The trick the signal would be given on.
     pub trick: Trick,
+    /// The suits the leader already signalled in this hand.
+    pub signalled: PerSuit<bool>,
 }
 
 /// The card that opens a trick, with the signal given alongside it. It can
@@ -135,6 +140,12 @@ impl Lead {
             return Err(Error::CannotSignal { signal, reason });
         }
         let play = Play::new(card, context.hand, &context.trick)?;
+        if context.signalled[card.suit()] {
+            return Err(Error::CannotSignal {
+                signal,
+                reason: SignalRefusal::AlreadySignalled,
+            });
+        }
         let hand = context.hand;
         let ace = TressetteCard::new(ItalianRank::Ace, card.suit());
         let (others, all_low) = hand
@@ -220,6 +231,7 @@ mod tests {
         *,
     };
     use crate::cards::italian::ItalianRank;
+    use crate::cards::italian::test_utils::per_suit_strategy;
     use crate::tressette::{
         Seat, card::test_utils::tressette_card_strategy, table::test_utils::seat_strategy,
         test_utils::hand_strategy,
@@ -240,6 +252,7 @@ mod tests {
             rules: Signal::ALL.into_iter().fold(Rules::default(), Rules::allow),
             hand,
             trick: Trick::new(Seat::North),
+            signalled: PerSuit::default(),
         }
     }
 
@@ -336,7 +349,27 @@ mod tests {
                 rules,
                 hand: &hand,
                 trick: Trick::new(Seat::North),
+                signalled: PerSuit::default(),
             };
+            prop_assert_eq!(Lead::new(lead, signal, &context).map(|_| ()), expected);
+        }
+
+        /// A leader that already signalled in the suit led can't signal in it
+        /// again; signals in other suits change nothing.
+        #[test]
+        fn a_seat_signals_once_per_suit(
+            hand in hand_strategy(),
+            pick in any::<Index>(),
+            signal in signal_strategy(),
+            signalled in per_suit_strategy(any::<bool>()),
+        ) {
+            let lead = *pick.get(&hand);
+            let expected = if signalled[lead.suit()] {
+                Err(Error::CannotSignal { signal, reason: SignalRefusal::AlreadySignalled })
+            } else {
+                Lead::new(lead, signal, &any_signal(&hand)).map(|_| ())
+            };
+            let context = Context { signalled, ..any_signal(&hand) };
             prop_assert_eq!(Lead::new(lead, signal, &context).map(|_| ()), expected);
         }
 
@@ -358,6 +391,7 @@ mod tests {
                 rules: allowed.into_iter().fold(Rules::default(), Rules::allow),
                 hand: &hand,
                 trick,
+                signalled: PerSuit::default(),
             };
             prop_assert_eq!(
                 Lead::new(lead, signal, &context).map(|_| ()),

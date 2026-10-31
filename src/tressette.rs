@@ -68,7 +68,10 @@ use std::collections::HashSet;
 use rand::{Rng, RngExt};
 
 use crate::{
-    cards::{deck::Deck, italian::Suit},
+    cards::{
+        deck::Deck,
+        italian::{PerSuit, Suit},
+    },
     engine::{Events, Game, Observation, Status, Turn, Viewer, Waiting},
 };
 
@@ -205,6 +208,8 @@ struct Hand {
     last_trick: Option<CompletedTrick>,
     /// What each seat declared this hand.
     declared: PerSeat<Vec<Declared>>,
+    /// The suits each seat signalled in this hand.
+    signalled: PerSeat<PerSuit<bool>>,
 }
 
 impl Hand {
@@ -589,8 +594,11 @@ impl Game for Tressette {
                     rules: self.config.signals,
                     hand: &hand.cards[seat],
                     trick: hand.trick,
+                    signalled: hand.signalled[seat],
                 };
-                Lead::new(card, signal, &context)?.play()
+                let lead = Lead::new(card, signal, &context)?;
+                hand.signalled[seat][lead.card().suit()] = true;
+                lead.play()
             }
         };
         let card = play.card();
@@ -653,6 +661,7 @@ impl Game for Tressette {
             trick: Trick::new(dealer.next()),
             last_trick: None,
             declared: PerSeat::default(),
+            signalled: PerSeat::default(),
         }));
         Ok(events)
     }
@@ -695,6 +704,7 @@ impl Game for Tressette {
                         rules: self.config.signals,
                         hand: &hand.cards[seat],
                         trick: hand.trick,
+                        signalled: hand.signalled[seat],
                     })
                 }),
         }
@@ -704,8 +714,18 @@ impl Game for Tressette {
 #[cfg(test)]
 /// Test utilities for the Tressette module.
 pub mod test_utils {
-    use super::{Config, HAND_SIZE, TressetteCard, deck, declaration::test_utils::rules_strategy};
+    use super::{
+        Config, HAND_SIZE, Seat, TressetteCard, deck,
+        declaration::{DeclarableRank, test_utils::rules_strategy},
+    };
+    use crate::cards::italian::Suit;
     use proptest::{prelude::*, sample};
+
+    /// The most actions a hand can take: every card played, and every seat
+    /// making every declaration it can, a napoli per suit and an accuso per
+    /// rank.
+    pub const MAX_HAND_ACTIONS: usize =
+        Seat::ALL.len() * (HAND_SIZE + Suit::ALL.len() + DeclarableRank::ALL.len());
 
     /// Generates any game configuration.
     pub fn config_strategy() -> impl Strategy<Value = Config> {
@@ -742,7 +762,7 @@ mod tests {
                 test_utils::{declared_by_seat_strategy, made},
             },
             table::test_utils::seat_strategy,
-            test_utils::config_strategy,
+            test_utils::{MAX_HAND_ACTIONS, config_strategy},
         },
     };
 
@@ -781,6 +801,7 @@ mod tests {
                     trick: Trick::new(Seat::North.next()),
                     last_trick: None,
                     declared: PerSeat::default(),
+                    signalled: PerSeat::default(),
                 })),
             },
         )
@@ -808,7 +829,10 @@ mod tests {
     /// public events of every action.
     fn play_hand(session: &mut Session<Tressette>) -> Vec<Event> {
         let mut events = Vec::new();
+        let mut actions = 0;
         while let Some(seat) = to_act(session) {
+            actions += 1;
+            assert!(actions <= MAX_HAND_ACTIONS, "the hand never ends");
             let action = session.observe(seat).legal_actions()[0];
             events.extend(session.act(seat, action).unwrap().public_only().cloned());
         }
@@ -1006,6 +1030,7 @@ mod tests {
             trick: Trick::new(last_taker),
             last_trick: None,
             declared: PerSeat::default(),
+            signalled: PerSeat::default(),
         }
     }
 
@@ -1279,14 +1304,21 @@ mod tests {
     }
 
     /// Checks that `seat` is offered a signalled lead exactly when it leads
-    /// the trick, for every card and signal the rules and its hand allow.
-    fn assert_signals_are_exact(session: &Session<Tressette>, config: Config, seat: Seat) {
+    /// the trick, for every card and signal the rules and its hand allow,
+    /// having already signalled in the suits marked in `signalled`.
+    fn assert_signals_are_exact(
+        session: &Session<Tressette>,
+        config: Config,
+        seat: Seat,
+        signalled: PerSuit<bool>,
+    ) {
         let hand = session.game().phase.hand().unwrap();
         let held = &hand.cards[seat];
         let context = signal::Context {
             rules: config.signals,
             hand: held,
             trick: hand.trick,
+            signalled,
         };
         let leading = hand.trick.led_suit().is_none();
         let expected: HashSet<_> = held
@@ -1351,6 +1383,8 @@ mod tests {
         let mut trackers = PerSeat::<Tracker>::default();
         let mut spectator = Tracker::default();
         let mut declared = PerTeam::<u8>::default();
+        let mut hand_actions = 0;
+        let mut signalled = PerSeat::<PerSuit<bool>>::default();
         loop {
             let update = match session.status() {
                 Status::Chance => session.resolve_chance(&mut deals).unwrap(),
@@ -1360,14 +1394,19 @@ mod tests {
                     };
                     assert_legality_is_exact(&session, seat);
                     assert_declarable_is_exact(&session, config, seat);
-                    assert_signals_are_exact(&session, config, seat);
+                    assert_signals_are_exact(&session, config, seat, signalled[seat]);
                     if choices.random_ratio(1, 500) {
                         let quitter = Seat::ALL[choices.random_range(0..Seat::ALL.len())];
                         session.forfeit(quitter).unwrap()
                     } else {
+                        hand_actions += 1;
+                        assert!(hand_actions <= MAX_HAND_ACTIONS, "the hand never ends");
                         let legal = session.observe(seat).legal_actions();
                         let action = legal[choices.random_range(0..legal.len())];
                         let update = session.act(seat, action).unwrap();
+                        if let Action::Lead { card, .. } = action {
+                            signalled[seat][card.suit()] = true;
+                        }
                         if let Action::Declare(declaration) = action {
                             assert_declared(&session, config, seat, declaration, &update);
                         }
@@ -1398,7 +1437,11 @@ mod tests {
                     "{event:?} has the wrong audience"
                 );
                 match event {
-                    Event::HandDealt { .. } => declared = PerTeam::default(),
+                    Event::HandDealt { .. } => {
+                        declared = PerTeam::default();
+                        hand_actions = 0;
+                        signalled = PerSeat::default();
+                    }
                     Event::Declared { seat, points, .. } => declared[seat.team()] += points,
                     Event::HandScored { points, .. } => assert_hand_points(*points, declared),
                     _ => {}
