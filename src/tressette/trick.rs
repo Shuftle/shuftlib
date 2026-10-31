@@ -2,7 +2,7 @@
 
 use crate::cards::italian::Suit;
 
-use super::{Seat, TressetteCard};
+use super::{Error, Seat, TressetteCard};
 
 /// The trick being played: who led it, and the cards played so far.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -130,14 +130,64 @@ fn plays<I: IntoIterator<Item = TressetteCard>>(
         .map(move |(turn, card)| (leader.after(turn), card))
 }
 
+/// A card a seat may play on the trick: it holds it, and it follows the led
+/// suit if it can.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Play(TressetteCard);
+
+impl Play {
+    /// Reads `card` as played from `hand` on `trick`, or says why it can't
+    /// be.
+    pub(crate) fn new(
+        card: TressetteCard,
+        hand: &[TressetteCard],
+        trick: &Trick,
+    ) -> Result<Self, Error> {
+        if !hand.contains(&card) {
+            return Err(Error::CardNotInHand { card });
+        }
+        if let Some(required) = trick.led_suit()
+            && card.suit() != required
+            && hand.iter().any(|held| held.suit() == required)
+        {
+            return Err(Error::MustFollowSuit { card, required });
+        }
+        Ok(Self(card))
+    }
+}
+
+#[cfg(test)]
+/// Test utilities for the trick module.
+pub mod test_utils {
+    use super::Trick;
+    use crate::tressette::{deck, table::test_utils::seat_strategy};
+    use proptest::{prelude::*, sample};
+
+    /// Generates a trick being played, from any leader, with up to three
+    /// cards on it.
+    pub fn trick_strategy() -> impl Strategy<Value = Trick> {
+        let cards = sample::subsequence(deck().into_iter().collect::<Vec<_>>(), 0..=3);
+        (seat_strategy(), cards).prop_map(|(leader, cards)| {
+            let mut trick = Trick::new(leader);
+            for card in cards {
+                trick.play(card);
+            }
+            trick
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use proptest::{prelude::*, sample};
 
-    use super::*;
+    use super::{test_utils::trick_strategy, *};
     use crate::{
         cards::italian::ItalianRank,
-        tressette::{deck, table::test_utils::seat_strategy},
+        tressette::{
+            card::test_utils::tressette_card_strategy, deck, table::test_utils::seat_strategy,
+            test_utils::hand_strategy,
+        },
     };
 
     fn card(rank: ItalianRank, suit: Suit) -> TressetteCard {
@@ -180,6 +230,35 @@ mod tests {
             prop_assert_eq!(completed.leader(), leader);
             prop_assert_eq!(completed.cards(), cards.as_slice());
             prop_assert_eq!(trick, Trick::new(completed.taker()));
+        }
+
+        /// A card can be played exactly when the hand holds it and, if the
+        /// hand holds the led suit, it's of that suit; a refusal names the
+        /// first of these that fails.
+        #[test]
+        fn a_card_is_played_exactly_when_held_and_following_suit(
+            hand in hand_strategy(),
+            trick in trick_strategy(),
+            from_hand in any::<bool>(),
+            pick in any::<sample::Index>(),
+            other in tressette_card_strategy(),
+        ) {
+            let hand: Vec<_> = hand
+                .into_iter()
+                .filter(|held| trick.plays().all(|(_, played)| played != *held))
+                .collect();
+            let card = if from_hand && !hand.is_empty() { *pick.get(&hand) } else { other };
+            let required = trick
+                .led_suit()
+                .filter(|&suit| hand.iter().any(|held| held.suit() == suit));
+            let expected = if !hand.contains(&card) {
+                Err(Error::CardNotInHand { card })
+            } else if let Some(required) = required.filter(|&suit| card.suit() != suit) {
+                Err(Error::MustFollowSuit { card, required })
+            } else {
+                Ok(())
+            };
+            prop_assert_eq!(Play::new(card, &hand, &trick).map(|_| ()), expected);
         }
     }
 }
