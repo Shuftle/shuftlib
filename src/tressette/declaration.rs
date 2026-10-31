@@ -7,7 +7,7 @@
 
 use crate::cards::italian::{ItalianRank, Suit};
 
-use super::TressetteCard;
+use super::{Error, TressetteCard};
 
 /// Points for a napoli: the Ace, Two and Three of one suit.
 pub const NAPOLI_POINTS: u8 = 3;
@@ -106,6 +106,88 @@ impl Declaration {
     }
 }
 
+/// What a seat's declaration is read against.
+pub(super) struct Context<'a> {
+    /// The tricks on which the variant allows declarations.
+    pub rules: Rules,
+    /// The 1-based number of the trick being played.
+    pub trick: usize,
+    /// The seat's cards.
+    pub hand: &'a [TressetteCard],
+    /// What the seat already declared this hand.
+    pub declared: &'a [Declared],
+}
+
+/// A declaration a seat has made. It can only be built from a declaration
+/// the rules allowed, so every `Declared` was legal when it was made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Declared(Declaration);
+
+impl Declared {
+    /// Reads `declaration` against `context`, or says why it can't be made:
+    /// when several reasons apply, the first of
+    /// [`WindowClosed`](DeclarationRefusal::WindowClosed),
+    /// [`NotHeld`](DeclarationRefusal::NotHeld),
+    /// [`AlreadyDeclared`](DeclarationRefusal::AlreadyDeclared) and
+    /// [`ReplacedByFour`](DeclarationRefusal::ReplacedByFour).
+    pub(super) fn parse(declaration: Declaration, context: &Context) -> Result<Self, Error> {
+        let refused = |reason| Error::CannotDeclare {
+            declaration,
+            reason,
+        };
+        if !context.rules.window.allows(context.trick) {
+            return Err(refused(DeclarationRefusal::WindowClosed));
+        }
+        if !declaration.can_declare(context.hand) {
+            return Err(refused(DeclarationRefusal::NotHeld));
+        }
+        let already = context
+            .declared
+            .iter()
+            .any(|&Declared(made)| match (declaration, made) {
+                (Declaration::Napoli(_), _) => made == declaration,
+                (Declaration::Accuso { rank, .. }, Declaration::Accuso { rank: taken, .. }) => {
+                    rank == taken
+                }
+                (Declaration::Accuso { .. }, Declaration::Napoli(_)) => false,
+            });
+        if already {
+            return Err(refused(DeclarationRefusal::AlreadyDeclared));
+        }
+        if let Declaration::Accuso {
+            rank,
+            size: Size::Three,
+        } = declaration
+            && (Declaration::Accuso {
+                rank,
+                size: Size::Four,
+            })
+            .can_declare(context.hand)
+        {
+            return Err(refused(DeclarationRefusal::ReplacedByFour));
+        }
+        Ok(Self(declaration))
+    }
+}
+
+/// Why a declaration can't be made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+pub enum DeclarationRefusal {
+    /// The rules don't allow declarations on this trick.
+    #[error("declarations aren't allowed on this trick")]
+    WindowClosed,
+    /// The hand doesn't hold its cards.
+    #[error("the hand doesn't hold its cards")]
+    NotHeld,
+    /// It, or an accuso of the same rank, was already declared.
+    #[error("it was already declared")]
+    AlreadyDeclared,
+    /// The hand holds all four cards of the rank, so only four of a kind may
+    /// be declared.
+    #[error("the hand holds all four, so only four of a kind may be declared")]
+    ReplacedByFour,
+}
+
 /// Returns the declarations a seat holding `hand` may still make, having
 /// already made `declared`.
 ///
@@ -189,6 +271,11 @@ pub mod test_utils {
         sample::select(DeclarableRank::ALL.to_vec())
     }
 
+    /// Generates any declaration, whether or not it could be made.
+    pub fn declaration_strategy() -> impl Strategy<Value = Declaration> {
+        sample::select(Declaration::all().collect::<Vec<_>>())
+    }
+
     /// Generates any set of distinct declarations, whether or not they could
     /// be made.
     pub fn declarations_strategy() -> impl Strategy<Value = Vec<Declaration>> {
@@ -225,7 +312,9 @@ pub mod test_utils {
 #[cfg(test)]
 mod tests {
     use super::{
-        test_utils::{declarable_rank_strategy, declarations_strategy},
+        test_utils::{
+            declarable_rank_strategy, declaration_strategy, declarations_strategy, rules_strategy,
+        },
         *,
     };
     use crate::cards::italian::test_utils::suit_strategy;
@@ -439,6 +528,60 @@ mod tests {
                 Declaration::Accuso { rank, size: Size::Four }.points(),
                 FOUR_OF_A_KIND_POINTS
             );
+        }
+
+        /// Outside the tricks the rules allow, no declaration can be made,
+        /// whatever the hand holds.
+        #[test]
+        fn no_declaration_is_made_outside_the_window(
+            rules in rules_strategy(),
+            trick in 1..=HAND_SIZE,
+            hand in cards_strategy(),
+            declaration in declaration_strategy(),
+            declared in declarations_strategy(),
+        ) {
+            prop_assume!(!rules.window.allows(trick));
+            let declared: Vec<_> = declared.into_iter().map(Declared).collect();
+            let context = Context { rules, trick, hand: &hand, declared: &declared };
+            prop_assert_eq!(
+                Declared::parse(declaration, &context).map(|_| ()),
+                Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::WindowClosed })
+            );
+        }
+
+        /// On the first trick, which every window allows, a declaration can be
+        /// made exactly when the hand holds it, neither it nor an accuso of its
+        /// rank was declared, and it isn't three of a kind while holding all
+        /// four; a refusal names the first of these that fails.
+        #[test]
+        fn a_declaration_is_made_exactly_when_held_and_free(
+            rules in rules_strategy(),
+            hand in cards_strategy(),
+            declaration in declaration_strategy(),
+            declared in declarations_strategy(),
+        ) {
+            let trick = 1;
+            let refused = |reason| Err(Error::CannotDeclare { declaration, reason });
+            let already = match declaration {
+                Declaration::Napoli(_) => declared.contains(&declaration),
+                Declaration::Accuso { rank, .. } => accuso_declared(&declared, rank),
+            };
+            let replaced_by_four = matches!(
+                declaration,
+                Declaration::Accuso { rank, size: Size::Three } if copies_of(&hand, rank) == Size::Four as usize
+            );
+            let expected = if !declaration.can_declare(&hand) {
+                refused(DeclarationRefusal::NotHeld)
+            } else if already {
+                refused(DeclarationRefusal::AlreadyDeclared)
+            } else if replaced_by_four {
+                refused(DeclarationRefusal::ReplacedByFour)
+            } else {
+                Ok(())
+            };
+            let declared: Vec<_> = declared.into_iter().map(Declared).collect();
+            let context = Context { rules, trick, hand: &hand, declared: &declared };
+            prop_assert_eq!(Declared::parse(declaration, &context).map(|_| ()), expected);
         }
 
         /// The first-trick window allows exactly trick 1.

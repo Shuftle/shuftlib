@@ -79,7 +79,7 @@ mod table;
 mod trick;
 
 pub use card::TressetteCard;
-use declaration::Declaration;
+use declaration::{Declaration, DeclarationRefusal};
 use signal::{Signal, SignalRefusal};
 pub use table::{PerSeat, PerTeam, Seat, Team};
 pub use trick::{CompletedTrick, Trick};
@@ -332,15 +332,13 @@ pub enum Error {
         /// The suit that led the trick.
         required: Suit,
     },
-    /// The rules don't allow declarations on this trick.
-    #[error("declarations aren't allowed on this trick")]
-    DeclarationWindowClosed,
-    /// The declaration isn't held in the hand, was already made, or is
-    /// replaced by another (see [`declaration::allowed`]).
-    #[error("{declaration:?} can't be declared")]
+    /// The declaration can't be made now.
+    #[error("{declaration:?} can't be declared: {reason}")]
     CannotDeclare {
         /// The declaration attempted.
         declaration: Declaration,
+        /// Why it can't be made.
+        reason: DeclarationRefusal,
     },
     /// The signal can't be given with this lead.
     #[error("{signal:?} can't be given: {reason}")]
@@ -562,12 +560,18 @@ impl Game for Tressette {
             Action::Declare(declaration) => {
                 let rules = self.config.declarations;
                 if !rules.window.allows(hand.current_trick()) {
-                    return Err(Error::DeclarationWindowClosed);
+                    return Err(Error::CannotDeclare {
+                        declaration,
+                        reason: DeclarationRefusal::WindowClosed,
+                    });
                 }
                 if !declaration::allowed(&hand.cards[seat], &hand.declared[seat])
                     .contains(&declaration)
                 {
-                    return Err(Error::CannotDeclare { declaration });
+                    return Err(Error::CannotDeclare {
+                        declaration,
+                        reason: DeclarationRefusal::NotHeld,
+                    });
                 }
                 hand.declared[seat].push(declaration);
                 let mut events = Events::new();

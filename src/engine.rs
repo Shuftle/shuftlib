@@ -1009,7 +1009,7 @@ mod tests {
             }
             self.secret = Some(secret);
             let mut events = Events::new();
-            events.private(Seat::First, Event::SecretIsEven(secret % 2 == 0));
+            events.private(Seat::First, Event::SecretIsEven(secret.is_multiple_of(2)));
             Ok(events)
         }
 
