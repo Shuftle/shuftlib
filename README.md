@@ -3,8 +3,8 @@
 Shuftlib is a Rust library for implementing turn-based games.
 
 Every game is a state machine implementing the `Game` trait. A `Session`
-drives it: it checks who may act, records every step so
-a game can be replayed from its log alone and only lets players see what
+drives it: it checks who may act, records every step, so a
+game can be replayed from its log alone, and only lets players see what
 they're allowed to know.
 
 - **Chance is explicit.** A chance step, such as a deal, has an outcome you

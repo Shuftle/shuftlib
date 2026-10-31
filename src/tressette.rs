@@ -6,7 +6,8 @@
 //! - A hand is worth eleven points: a point per three thirds taken (see
 //!   [`TressetteCard::thirds`]), and one for the last trick.
 //! - A team wins with at least [`SCORE_TO_WIN`] points and more than the other.
-//! - Accusi ([`declaration`]) count only for a team that scored from its tricks.
+//! - Accusi ([`declaration`]) are declared on the seat's turn, before it plays,
+//!   and count only for a team that scored from its tricks.
 //! - Signals ([`signal`]) are given only with a lead.
 //! - When accusi may be made, what others learn from them, and which signals
 //!   are allowed are set by the [`Config`].
@@ -84,8 +85,8 @@ pub use card::TressetteCard;
 use declaration::{Declaration, DeclarationRefusal, Declared};
 use signal::{Lead, Signal, SignalRefusal};
 pub use table::{PerSeat, PerTeam, Seat, Team};
-use trick::Play;
 pub use trick::{CompletedTrick, Trick};
+use trick::{Opening, Play};
 
 /// The score a team needs to win, provided it's ahead.
 pub const SCORE_TO_WIN: u8 = 31;
@@ -233,7 +234,6 @@ impl Hand {
         signal::Context {
             rules,
             hand: &self.cards[seat],
-            trick: self.trick,
             signalled: self.signalled[seat],
             led: self.led,
         }
@@ -374,6 +374,9 @@ pub enum Error {
         /// The card played.
         card: TressetteCard,
     },
+    /// The seat tried to lead, but the trick already has a card.
+    #[error("the trick has already been led")]
+    NotLeading,
     /// The card doesn't follow the led suit, and the hand has cards of it.
     #[error("{card} was played, but the hand must follow {required}")]
     MustFollowSuit {
@@ -426,7 +429,7 @@ pub struct View {
     score: PerTeam<u8>,
     dealer: Option<Seat>,
     declarable: Vec<Declaration>,
-    leads: Vec<Lead>,
+    leads: Vec<(TressetteCard, Signal)>,
 }
 
 impl View {
@@ -493,6 +496,13 @@ impl View {
     pub fn declarable(&self) -> &[Declaration] {
         &self.declarable
     }
+
+    /// Returns the cards the observing seat may lead with a signal now, each
+    /// with the signal. Empty when it isn't leading the trick, and for a
+    /// spectator.
+    pub fn leads(&self) -> &[(TressetteCard, Signal)] {
+        &self.leads
+    }
 }
 
 impl Observation for View {
@@ -510,10 +520,11 @@ impl Observation for View {
             .into_iter()
             .map(Action::Play)
             .chain(self.declarable.iter().copied().map(Action::Declare))
-            .chain(self.leads.iter().map(|lead| Action::Lead {
-                card: lead.card(),
-                signal: lead.signal(),
-            }))
+            .chain(
+                self.leads
+                    .iter()
+                    .map(|&(card, signal)| Action::Lead { card, signal }),
+            )
             .collect()
     }
 }
@@ -595,8 +606,11 @@ impl Game for Tressette {
             return Err(Error::NoHandInProgress);
         };
         let seat = turn.seat();
-        let (play, lead) = match action {
-            Action::Play(card) => (Play::new(card, &hand.cards[seat], &hand.trick)?, None),
+        let (card, lead) = match action {
+            Action::Play(card) => (
+                Play::new(card, &hand.cards[seat], &hand.trick)?.card(),
+                None,
+            ),
             Action::Declare(declaration) => {
                 let rules = self.config.declarations;
                 let made = Declared::new(declaration, &hand.declaration_context(rules, seat))?;
@@ -611,16 +625,16 @@ impl Game for Tressette {
                 return Ok(events);
             }
             Action::Lead { card, signal } => {
+                let opening = Opening::new(card, &hand.cards[seat], &hand.trick)?;
                 let lead = Lead::new(
-                    card,
+                    opening,
                     signal,
                     &hand.signal_context(self.config.signals, seat),
                 )?;
                 hand.signalled[seat][lead.card().suit()] = true;
-                (lead.play(), Some(lead))
+                (lead.card(), Some(lead))
             }
         };
-        let card = play.card();
         if hand.trick.led_suit().is_none() {
             hand.led[card.suit()] = true;
         }
@@ -733,7 +747,10 @@ impl Game for Tressette {
                 declaration::allowed(&hand.declaration_context(self.config.declarations, seat))
             }),
             leads: to_act.map_or(Vec::new(), |(hand, seat)| {
-                signal::allowed(&hand.signal_context(self.config.signals, seat))
+                signal::allowed(&hand.signal_context(self.config.signals, seat), &hand.trick)
+                    .into_iter()
+                    .map(|lead| (lead.card(), lead.signal()))
+                    .collect()
             }),
         }
     }
@@ -1358,7 +1375,6 @@ mod tests {
         let context = signal::Context {
             rules: config.signals,
             hand: held,
-            trick: hand.trick,
             signalled,
             led,
         };
@@ -1366,16 +1382,27 @@ mod tests {
         let expected: HashSet<_> = held
             .iter()
             .flat_map(|&card| Signal::ALL.map(|signal| (card, signal)))
-            .filter(|&(card, signal)| leading && Lead::new(card, signal, &context).is_ok())
-            .map(|(card, signal)| Action::Lead { card, signal })
+            .filter(|&(card, signal)| {
+                leading
+                    && Opening::new(card, held, &hand.trick)
+                        .and_then(|opening| Lead::new(opening, signal, &context))
+                        .is_ok()
+            })
             .collect();
-        let offered: HashSet<_> = session
-            .observe(seat)
+        let view = session.observe(seat);
+        let offered: HashSet<_> = view
             .legal_actions()
             .into_iter()
-            .filter(|action| matches!(action, Action::Lead { .. }))
+            .filter_map(|action| match action {
+                Action::Lead { card, signal } => Some((card, signal)),
+                _ => None,
+            })
             .collect();
         assert_eq!(offered, expected);
+        assert_eq!(
+            view.leads().iter().copied().collect::<HashSet<_>>(),
+            expected
+        );
     }
 
     /// Checks that `action` by `seat` told everyone which card was played in

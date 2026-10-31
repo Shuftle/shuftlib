@@ -187,6 +187,33 @@ impl Play {
     }
 }
 
+/// A card a seat leads: it holds it, and the trick has no card yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Opening(TressetteCard);
+
+impl Opening {
+    /// Builds the lead of `card` from `hand` on `trick`, or returns why it
+    /// can't be led.
+    pub(crate) fn new(
+        card: TressetteCard,
+        hand: &[TressetteCard],
+        trick: &Trick,
+    ) -> Result<Self, Error> {
+        if trick.led_suit().is_some() {
+            return Err(Error::NotLeading);
+        }
+        if !hand.contains(&card) {
+            return Err(Error::CardNotInHand { card });
+        }
+        Ok(Self(card))
+    }
+
+    /// Returns the card led.
+    pub(crate) fn card(self) -> TressetteCard {
+        self.0
+    }
+}
+
 #[cfg(test)]
 /// Test utilities for the trick module.
 pub mod test_utils {
