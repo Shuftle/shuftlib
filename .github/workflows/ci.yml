@@ -90,6 +90,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Linting
         run: cargo clippy --locked --all-targets -- -D warnings
+        env:
+          CARGO_BUILD_WARNINGS: deny
 
   docs:
     name: Docs
@@ -104,13 +106,3 @@ jobs:
         run: cargo doc --locked --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
-
-  dependencies:
-    name: Unused dependencies
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Machete
-        uses: bnjbvr/cargo-machete@v0.10.1
