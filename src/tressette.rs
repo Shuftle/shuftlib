@@ -726,7 +726,7 @@ impl Game for Tressette {
             status: self.status(),
             hand: hand
                 .zip(viewer.seat())
-                .map_or(Vec::new(), |(hand, seat)| hand.cards[seat].clone()),
+                .map_or_default(|(hand, seat)| hand.cards[seat].clone()),
             hand_sizes: PerSeat::from_fn(|seat| hand.map_or(0, |hand| hand.cards[seat].len())),
             trick: hand.map(|hand| hand.trick),
             last_trick: hand.and_then(|hand| hand.last_trick),
@@ -735,10 +735,10 @@ impl Game for Tressette {
             }),
             score: self.score,
             dealer: self.dealer,
-            declarable: to_act.map_or(Vec::new(), |(hand, seat)| {
+            declarable: to_act.map_or_default(|(hand, seat)| {
                 declaration::allowed(&hand.declaration_context(self.config.declarations, seat))
             }),
-            leads: to_act.map_or(Vec::new(), |(hand, seat)| {
+            leads: to_act.map_or_default(|(hand, seat)| {
                 signal::allowed(
                     &hand.signal_context(self.config.signals, seat),
                     &hand.cards[seat],
@@ -789,6 +789,8 @@ pub mod test_utils {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::StdRng};
 
@@ -958,9 +960,9 @@ mod tests {
     proptest! {
         /// Whatever the score, at most one team has won, a winner has reached
         /// the target and is ahead, and below the target or on a tie the game
-        /// goes on. Scores never pass 52, so that's where they're drawn.
+        /// goes on.
         #[test]
-        fn only_a_team_ahead_at_the_target_wins(north_south in 0u8..=60, east_west in 0u8..=60) {
+        fn only_a_team_ahead_at_the_target_wins(north_south in any::<u8>(), east_west in any::<u8>()) {
             let score = PerTeam { north_south, east_west };
             match winner(score) {
                 Some(team) => {
@@ -1122,13 +1124,13 @@ mod tests {
         // Between hands too.
         let mut session = Session::<Tressette>::new(Config::default());
         session.forfeit(Seat::East).unwrap();
-        assert!(matches!(
+        assert_matches!(
             session.status(),
             Status::Over(Outcome {
                 winner: Team::NorthSouth,
                 ..
             })
-        ));
+        );
     }
 
     #[test]
@@ -1287,9 +1289,7 @@ mod tests {
             assert_eq!(view.tricks_taken(), self.tricks_taken);
             assert_eq!(view.score(), self.score);
             assert_eq!(view.dealer(), self.dealer);
-            let trick = view
-                .trick()
-                .map_or(Vec::new(), |trick| trick.plays().collect());
+            let trick: Vec<_> = view.trick().map_or_default(|trick| trick.plays().collect());
             assert_eq!(trick, self.trick);
             assert_eq!(view.trick().and_then(Trick::signal), self.signal);
         }

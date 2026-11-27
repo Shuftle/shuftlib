@@ -62,8 +62,8 @@ pub trait Game: Sized {
     /// Something a seat can do.
     type Action: Clone + Eq + Debug;
     /// The outcome of a chance step, e.g. a whole deal or a die roll. Games
-    /// without randomness use [`Infallible`](std::convert::Infallible),
-    /// which has no values: the compiler then knows chance never happens.
+    /// without randomness use `!`, which has no values: the compiler then
+    /// knows chance never happens.
     type Chance: Clone + Eq + Debug;
     /// Something that happened as a result of a step.
     type Event: Clone + Debug;
@@ -874,7 +874,7 @@ impl<G: Game> Session<G> {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Range;
+    use std::{assert_matches, ops::Range};
 
     use proptest::{collection::vec, option, prelude::*};
     use rand::{RngExt, SeedableRng, rngs::StdRng, seq::IndexedRandom};
@@ -1175,7 +1175,7 @@ mod tests {
     #[test]
     fn finished_games_reject_actions() {
         let mut session = play_out(7);
-        assert!(matches!(session.status(), Status::Over(_)));
+        assert_matches!(session.status(), Status::Over(_));
         assert_eq!(
             session.act(Seat::First, Action::Guess(0)),
             Err(ActError::GameOver)
@@ -1357,7 +1357,7 @@ mod tests {
             if let Some(&only) = seats.first().filter(|&&first| seats.iter().all(|&seat| seat == first)) {
                 prop_assert_eq!(waiting.clone(), Some(Waiting::one(only)));
             }
-            let waiting = waiting.map_or(Vec::new(), |waiting| waiting.to_vec());
+            let waiting = waiting.map_or_default(|waiting| waiting.to_vec());
             let first_appearances: Vec<u8> = seats
                 .iter()
                 .enumerate()

@@ -27,7 +27,7 @@
         devShells.default = mkShell {
           buildInputs = [
             bacon
-            cargo-machete
+            cargo-mutants
             cargo-deny
             cargo-edit
             cargo-semver-checks
