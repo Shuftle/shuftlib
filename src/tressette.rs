@@ -958,9 +958,9 @@ mod tests {
     proptest! {
         /// Whatever the score, at most one team has won, a winner has reached
         /// the target and is ahead, and below the target or on a tie the game
-        /// goes on. Scores never pass 52, so that's where they're drawn.
+        /// goes on.
         #[test]
-        fn only_a_team_ahead_at_the_target_wins(north_south in 0u8..=60, east_west in 0u8..=60) {
+        fn only_a_team_ahead_at_the_target_wins(north_south in any::<u8>(), east_west in any::<u8>()) {
             let score = PerTeam { north_south, east_west };
             match winner(score) {
                 Some(team) => {
