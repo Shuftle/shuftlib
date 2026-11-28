@@ -209,9 +209,10 @@ impl<T: Card> Deck<T> {
     /// use shuftlib::cards::{deck::Deck, italian::ItalianCard};
     ///
     /// let mut deck = Deck::italian();
-    /// let drawn = deck.draw_n(3).unwrap().collect::<Vec<_>>();
+    /// let drawn = deck.draw_n(3).ok_or("not enough cards")?.collect::<Vec<_>>();
     /// assert_eq!(drawn.len(), 3);
     /// assert_eq!(deck.len(), 37);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn draw_n(&mut self, n: usize) -> Option<impl Iterator<Item = T>> {
         if self.cards.len() < n {
@@ -266,7 +267,7 @@ impl<T: Card> Deck<T> {
     /// ];
     /// let deck: Deck<ItalianCard> = Deck::from(cards.clone());
     /// assert_eq!(deck.iter().count(), 3);
-    /// assert_eq!(*deck.iter().next().unwrap(), cards[0]);
+    /// assert_eq!(deck.iter().next(), cards.first());
     /// ```
     pub fn iter(&self) -> std::slice::Iter<'_, T> {
         self.cards.iter()
@@ -365,48 +366,58 @@ mod tests {
     use crate::cards::italian::test_utils::suit_strategy;
     use std::collections::BTreeSet;
 
+    use anyhow::{Context, ensure};
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::StdRng};
 
     #[test]
-    fn shuffle_changes_order() {
+    fn shuffle_changes_order() -> anyhow::Result<()> {
         let sorted_deck = Deck::italian();
 
         let mut shuffled_deck = Deck::italian();
         shuffled_deck.shuffle(&mut rand::rng());
 
-        assert_ne!(sorted_deck.as_slice(), shuffled_deck.as_slice());
+        ensure!(sorted_deck.as_slice() != shuffled_deck.as_slice());
+        Ok(())
     }
 
     /// Every position inside the deck, between the bottom and the top card,
     /// can receive the card.
     #[test]
-    fn shuffle_card_can_reach_every_position_inside_the_deck() {
+    fn shuffle_card_can_reach_every_position_inside_the_deck() -> anyhow::Result<()> {
         let cards: Vec<ItalianCard> = Deck::italian().into_iter().collect();
-        let (outsider, rest) = cards.split_last().unwrap();
+        let (outsider, rest) = cards.split_last().context("the deck has cards")?;
         for len in 2..10 {
-            let reached: BTreeSet<usize> = (0..500)
+            let reached = (0..500)
                 .map(|seed| {
-                    let mut deck = Deck::from(rest[..len].to_vec());
+                    let below = rest.get(..len).context("the deck has enough cards")?;
+                    let mut deck = Deck::from(below.to_vec());
                     deck.shuffle_card(*outsider, &mut StdRng::seed_from_u64(seed));
-                    deck.iter().position(|card| card == outsider).unwrap()
+                    deck.iter()
+                        .position(|card| card == outsider)
+                        .context("the card is in the deck")
                 })
-                .collect();
-            assert_eq!(reached, (1..len).collect(), "a deck of {len} cards");
+                .collect::<anyhow::Result<BTreeSet<usize>>>()?;
+            ensure!(
+                reached == (1..len).collect(),
+                "a deck of {len} cards reached {reached:?}"
+            );
         }
+        Ok(())
     }
 
     #[test]
-    fn draw_n_basic() {
+    fn draw_n_basic() -> anyhow::Result<()> {
         let mut deck = Deck::italian();
-        let drawn: Vec<_> = deck.draw_n(5).unwrap().collect();
-        assert_eq!(drawn.len(), 5);
-        assert_eq!(deck.len(), 35);
+        let drawn: Vec<_> = deck.draw_n(5).context("the deck has 5 cards")?.collect();
+        ensure!(drawn.len() == 5);
+        ensure!(deck.len() == 35);
 
         // Drawing more than available returns None and does not change the deck
         let mut deck = Deck::italian();
-        assert!(deck.draw_n(41).is_none());
-        assert_eq!(deck.len(), 40);
+        ensure!(deck.draw_n(41).is_none());
+        ensure!(deck.len() == 40);
+        Ok(())
     }
 
     proptest! {
@@ -442,9 +453,11 @@ mod tests {
                 .filter(|(_, other)| **other == card)
                 .map(|(position, _)| position)
                 .collect();
-            prop_assert_eq!(positions.len(), 1);
+            let &[position] = positions.as_slice() else {
+                return Err(TestCaseError::fail(format!("the card is at {positions:?}")));
+            };
             if old_len >= 2 {
-                prop_assert!(positions[0] != 0 && positions[0] != old_len);
+                prop_assert!(position != 0 && position != old_len);
             }
         }
     }
