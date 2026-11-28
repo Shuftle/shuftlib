@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/Shuftle/shuftlib/compare/v0.5.0...v0.6.0) - 2026-11-28
+
+### Added
+
+- *(tressette)* [**breaking**] declarations in the view, named missing suit ([#28](https://github.com/Shuftle/shuftlib/pull/28))
+- *(tressette)* [**breaking**] Signals ([#24](https://github.com/Shuftle/shuftlib/pull/24))
+- *(tressette)* Accusi ([#22](https://github.com/Shuftle/shuftlib/pull/22))
+
+### Other
+
+- return errors instead of panicking ([#29](https://github.com/Shuftle/shuftlib/pull/29))
+- rust 1.100 ([#27](https://github.com/Shuftle/shuftlib/pull/27))
+- *(deps)* bump bnjbvr/cargo-machete from 0.9.2 to 0.10.1 ([#26](https://github.com/Shuftle/shuftlib/pull/26))
+- *(deps)* bump rand ([#25](https://github.com/Shuftle/shuftlib/pull/25))
+
 ## [0.5.0](https://github.com/Shuftle/shuftlib/compare/v0.4.0...v0.5.0) - 2026-10-16
 
 ### Other
