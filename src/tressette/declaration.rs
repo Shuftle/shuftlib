@@ -262,6 +262,16 @@ impl Declared {
     pub(crate) fn declaration(self) -> Declaration {
         self.0
     }
+
+    /// Returns what everyone sees of the declaration under `visibility`.
+    pub(crate) fn seen(self, visibility: Visibility) -> DeclarationSeen {
+        match visibility {
+            Visibility::Exact => DeclarationSeen::Exact(self.0),
+            Visibility::Anonymous => DeclarationSeen::Hidden {
+                points: self.0.points(),
+            },
+        }
+    }
 }
 
 /// Makes `declaration` in `context`, through each rule a declaration must

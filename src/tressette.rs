@@ -424,6 +424,7 @@ pub struct View {
     tricks_taken: PerTeam<usize>,
     score: PerTeam<u8>,
     dealer: Option<Seat>,
+    declared: PerSeat<Vec<DeclarationSeen>>,
     declarable: Vec<Declaration>,
     leads: Vec<(TressetteCard, Signal)>,
 }
@@ -470,6 +471,13 @@ impl View {
     /// before the first deal.
     pub fn dealer(&self) -> Option<Seat> {
         self.dealer
+    }
+
+    /// Returns what each seat declared in this hand, in order: exactly for
+    /// the observing seat's own declarations, as the rules let everyone see
+    /// them for the others. Empty between hands.
+    pub fn declared(&self) -> &PerSeat<Vec<DeclarationSeen>> {
+        &self.declared
     }
 
     /// Returns the cards the observing seat may play. Empty when it's not
@@ -616,12 +624,7 @@ impl Game for Tressette {
                 let mut events = Events::new();
                 events.public(Event::Declared {
                     seat,
-                    declaration: match rules.visibility {
-                        declaration::Visibility::Exact => DeclarationSeen::Exact(declaration),
-                        declaration::Visibility::Anonymous => DeclarationSeen::Hidden {
-                            points: declaration.points(),
-                        },
-                    },
+                    declaration: made.seen(rules.visibility),
                 });
                 return Ok(events);
             }
@@ -736,6 +739,20 @@ impl Game for Tressette {
             }),
             score: self.score,
             dealer: self.dealer,
+            declared: hand.map_or_default(|hand| {
+                PerSeat::from_fn(|seat| {
+                    hand.declared[seat]
+                        .iter()
+                        .map(|&made| {
+                            if viewer.seat() == Some(seat) {
+                                DeclarationSeen::Exact(made.declaration())
+                            } else {
+                                made.seen(self.config.declarations.visibility)
+                            }
+                        })
+                        .collect()
+                })
+            }),
             declarable: to_act.map_or_default(|(hand, seat)| {
                 declaration::allowed(&hand.declaration_context(self.config.declarations, seat))
             }),
@@ -1215,7 +1232,8 @@ mod tests {
         }
     }
 
-    /// What one seat knows, rebuilt from nothing but the events it receives.
+    /// What one seat knows, rebuilt from nothing but the events it receives
+    /// and the declarations it made itself.
     #[derive(Debug, Default)]
     struct Tracker {
         hand: Vec<TressetteCard>,
@@ -1226,6 +1244,9 @@ mod tests {
         tricks_taken: PerTeam<usize>,
         score: PerTeam<u8>,
         dealer: Option<Seat>,
+        declared: PerSeat<Vec<DeclarationSeen>>,
+        /// The declaration this seat just made, until its event arrives.
+        made: Option<Declaration>,
     }
 
     impl Tracker {
@@ -1279,7 +1300,20 @@ mod tests {
                         ..Self::default()
                     };
                 }
-                Event::Declared { .. } | Event::GameWon { .. } => {}
+                Event::Declared {
+                    seat: player,
+                    declaration,
+                } => {
+                    let seen = if Some(*player) == viewer {
+                        DeclarationSeen::Exact(
+                            self.made.take().expect("the seat knows what it declared"),
+                        )
+                    } else {
+                        *declaration
+                    };
+                    self.declared[*player].push(seen);
+                }
+                Event::GameWon { .. } => {}
             }
         }
 
@@ -1293,6 +1327,7 @@ mod tests {
             let trick: Vec<_> = view.trick().map_or_default(|trick| trick.plays().collect());
             assert_eq!(trick, self.trick);
             assert_eq!(view.trick().and_then(Trick::signal), self.signal);
+            assert_eq!(view.declared(), &self.declared);
         }
     }
 
@@ -1512,6 +1547,7 @@ mod tests {
                         assert_card_event(seat, action, &update);
                         if let Action::Declare(declaration) = action {
                             assert_declared(&session, config, seat, declaration, &update);
+                            trackers[seat].made = Some(declaration);
                         }
                         update
                     }
