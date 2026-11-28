@@ -46,45 +46,38 @@ impl From<DeclarableRank> for ItalianRank {
 /// The ranks that make up a napoli, in any suit.
 const NAPOLI_RANKS: [ItalianRank; 3] = [ItalianRank::Ace, ItalianRank::Two, ItalianRank::Three];
 
-/// The number of cards in an accuso: three or four of one rank.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Size {
-    /// Three cards of one rank.
-    Three = 3,
-    /// Four cards of one rank.
-    Four = 4,
-}
-
 /// A declaration a seat can make.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Declaration {
     /// The Ace, Two and Three of one suit.
     Napoli(Suit),
-    /// Three or four cards of one declarable rank.
-    Accuso {
+    /// The cards of one declarable rank in every suit but one.
+    ThreeOfAKind {
         /// The rank of the cards.
         rank: DeclarableRank,
-        /// How many cards of that rank.
-        size: Size,
+        /// The suit whose card of that rank is not part of it.
+        missing: Suit,
     },
+    /// The cards of one declarable rank in every suit.
+    FourOfAKind(DeclarableRank),
+}
+
+impl Display for DeclarableRank {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Three => "Threes",
+            Self::Two => "Twos",
+            Self::Ace => "Aces",
+        })
+    }
 }
 
 impl Display for Declaration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Napoli(suit) => write!(f, "napoli of {suit}"),
-            Self::Accuso { rank, size } => {
-                let count = match size {
-                    Size::Three => "three",
-                    Size::Four => "four",
-                };
-                let ranks = match rank {
-                    DeclarableRank::Three => "Threes",
-                    DeclarableRank::Two => "Twos",
-                    DeclarableRank::Ace => "Aces",
-                };
-                write!(f, "{count} {ranks}")
-            }
+            Self::ThreeOfAKind { rank, missing } => write!(f, "three {rank}, missing {missing}"),
+            Self::FourOfAKind(rank) => write!(f, "four {rank}"),
         }
     }
 }
@@ -94,22 +87,21 @@ impl Declaration {
     pub fn points(&self) -> u8 {
         match self {
             Self::Napoli(_) => NAPOLI_POINTS,
-            Self::Accuso {
-                size: Size::Three, ..
-            } => THREE_OF_A_KIND_POINTS,
-            Self::Accuso {
-                size: Size::Four, ..
-            } => FOUR_OF_A_KIND_POINTS,
+            Self::ThreeOfAKind { .. } => THREE_OF_A_KIND_POINTS,
+            Self::FourOfAKind(_) => FOUR_OF_A_KIND_POINTS,
         }
     }
 
-    /// Returns every declaration there is: a napoli per suit, and three and
-    /// four of a kind of each declarable rank.
+    /// Returns every declaration there is: a napoli per suit, and of each
+    /// declarable rank, three of a kind missing each suit and four of a kind.
     pub fn all() -> impl Iterator<Item = Self> {
         let napoli = Suit::ALL.into_iter().map(Self::Napoli);
-        let accusi = DeclarableRank::ALL
-            .into_iter()
-            .flat_map(|rank| [Size::Three, Size::Four].map(|size| Self::Accuso { rank, size }));
+        let accusi = DeclarableRank::ALL.into_iter().flat_map(|rank| {
+            Suit::ALL
+                .into_iter()
+                .map(move |missing| Self::ThreeOfAKind { rank, missing })
+                .chain([Self::FourOfAKind(rank)])
+        });
         napoli.chain(accusi)
     }
 
@@ -119,12 +111,27 @@ impl Declaration {
             Self::Napoli(suit) => NAPOLI_RANKS
                 .iter()
                 .all(|&rank| hand.contains(&TressetteCard::new(rank, suit))),
-            Self::Accuso { rank, size } => {
-                let rank = ItalianRank::from(rank);
-                hand.iter().filter(|card| card.rank() == rank).count() >= size as usize
-            }
+            Self::ThreeOfAKind { rank, missing } => Suit::ALL
+                .iter()
+                .filter(|&&suit| suit != missing)
+                .all(|&suit| hand.contains(&TressetteCard::new(rank.into(), suit))),
+            Self::FourOfAKind(rank) => copies(hand, rank) == Suit::ALL.len(),
         }
     }
+
+    /// Returns the rank of an accuso, or `None` for a napoli.
+    fn accuso_rank(self) -> Option<DeclarableRank> {
+        match self {
+            Self::Napoli(_) => None,
+            Self::ThreeOfAKind { rank, .. } | Self::FourOfAKind(rank) => Some(rank),
+        }
+    }
+}
+
+/// Returns how many cards of `rank` `hand` holds.
+fn copies(hand: &[TressetteCard], rank: DeclarableRank) -> usize {
+    let rank = ItalianRank::from(rank);
+    hand.iter().filter(|card| card.rank() == rank).count()
 }
 
 /// What a seat's declaration is read against.
@@ -194,12 +201,9 @@ impl<'a> HeldDeclaration<'a> {
         let declaration = self.declaration;
         let already = declared
             .iter()
-            .any(|&Declared(made)| match (declaration, made) {
-                (Declaration::Napoli(_), _) => made == declaration,
-                (Declaration::Accuso { rank, .. }, Declaration::Accuso { rank: taken, .. }) => {
-                    rank == taken
-                }
-                (Declaration::Accuso { .. }, Declaration::Napoli(_)) => false,
+            .any(|&Declared(made)| match declaration.accuso_rank() {
+                None => made == declaration,
+                rank => made.accuso_rank() == rank,
             });
         if already {
             Err(refused(declaration, DeclarationRefusal::AlreadyDeclared))
@@ -218,15 +222,8 @@ impl Unmade<'_> {
     /// the hand holds all four.
     pub(crate) fn declare(self) -> Result<Declared, Error> {
         let HeldDeclaration { declaration, hand } = self.0;
-        if let Declaration::Accuso {
-            rank,
-            size: Size::Three,
-        } = declaration
-            && (Declaration::Accuso {
-                rank,
-                size: Size::Four,
-            })
-            .is_held_in(hand)
+        if let Declaration::ThreeOfAKind { rank, .. } = declaration
+            && Declaration::FourOfAKind(rank).is_held_in(hand)
         {
             return Err(refused(declaration, DeclarationRefusal::ReplacedByFour));
         }
@@ -447,6 +444,15 @@ mod tests {
             .collect()
     }
 
+    /// The cards of `rank` in every suit but `missing`.
+    fn three_cards(rank: DeclarableRank, missing: Suit) -> Vec<TressetteCard> {
+        Suit::ALL
+            .iter()
+            .filter(|&&suit| suit != missing)
+            .map(|&suit| TressetteCard::new(rank.into(), suit))
+            .collect()
+    }
+
     fn copies_of(hand: &[TressetteCard], rank: DeclarableRank) -> usize {
         hand.iter()
             .filter(|card| card.rank() == ItalianRank::from(rank))
@@ -478,7 +484,8 @@ mod tests {
     fn cards_of(declaration: Declaration) -> Vec<TressetteCard> {
         match declaration {
             Declaration::Napoli(suit) => napoli_cards(suit),
-            Declaration::Accuso { rank, size } => cards_of_rank(rank, size as usize),
+            Declaration::ThreeOfAKind { rank, missing } => three_cards(rank, missing),
+            Declaration::FourOfAKind(rank) => cards_of_rank(rank, Suit::ALL.len()),
         }
     }
 
@@ -486,20 +493,21 @@ mod tests {
     fn accuso_declared(declared: &[Declaration], rank: DeclarableRank) -> bool {
         declared
             .iter()
-            .any(|declaration| matches!(declaration, Declaration::Accuso { rank: declared, .. } if *declared == rank))
+            .any(|declaration| declaration.accuso_rank() == Some(rank))
     }
 
     proptest! {
-        /// Every napoli, and both sizes of accuso of every declarable rank,
-        /// is among all the declarations.
+        /// Every napoli, every three of a kind and every four of a kind is
+        /// among all the declarations.
         #[test]
         fn all_declarations_cover_every_napoli_and_accuso(
             suit in suit_strategy(),
             rank in declarable_rank_strategy(),
+            missing in suit_strategy(),
         ) {
             let all: Vec<_> = Declaration::all().collect();
-            let three = Declaration::Accuso { rank, size: Size::Three };
-            let four = Declaration::Accuso { rank, size: Size::Four };
+            let three = Declaration::ThreeOfAKind { rank, missing };
+            let four = Declaration::FourOfAKind(rank);
             prop_assert!(all.contains(&Declaration::Napoli(suit)));
             prop_assert!(all.contains(&three));
             prop_assert!(all.contains(&four));
@@ -525,29 +533,33 @@ mod tests {
         #[test]
         fn four_of_a_kind_is_allowed_when_held_and_the_rank_is_free(
             rank in declarable_rank_strategy(),
-            copies in 0..=Size::Four as usize,
+            copies in 0..=Suit::ALL.len(),
             hand in cards_strategy(),
             declared in declarations_strategy(),
         ) {
             let hand = with_cards(&hand, &cards_of_rank(rank, copies));
-            let four = Declaration::Accuso { rank, size: Size::Four };
-            let expected = copies_of(&hand, rank) == Size::Four as usize
+            let four = Declaration::FourOfAKind(rank);
+            let expected = copies_of(&hand, rank) == Suit::ALL.len()
                 && !accuso_declared(&declared, rank);
             prop_assert_eq!(allowed_on_first_trick(&hand, &declared).contains(&four), expected);
         }
 
-        /// Three of a kind is allowed exactly when the hand holds three cards
-        /// of the rank, not all four, and no accuso of it was declared.
+        /// Three of a kind is allowed exactly when the hand holds its three
+        /// cards but not the missing one, and no accuso of the rank was
+        /// declared.
         #[test]
         fn three_of_a_kind_is_allowed_when_four_is_not_held_and_the_rank_is_free(
             rank in declarable_rank_strategy(),
-            copies in 0..=Size::Four as usize,
+            missing in suit_strategy(),
+            copies in 0..=Suit::ALL.len(),
             hand in cards_strategy(),
             declared in declarations_strategy(),
         ) {
             let hand = with_cards(&hand, &cards_of_rank(rank, copies));
-            let three = Declaration::Accuso { rank, size: Size::Three };
-            let expected = copies_of(&hand, rank) == Size::Three as usize
+            let three = Declaration::ThreeOfAKind { rank, missing };
+            let held = three_cards(rank, missing).iter().all(|card| hand.contains(card));
+            let expected = held
+                && copies_of(&hand, rank) < Suit::ALL.len()
                 && !accuso_declared(&declared, rank);
             prop_assert_eq!(allowed_on_first_trick(&hand, &declared).contains(&three), expected);
         }
@@ -557,14 +569,14 @@ mod tests {
         fn a_set_is_held_in_any_hand_holding_its_cards(
             suit in suit_strategy(),
             rank in declarable_rank_strategy(),
+            missing in suit_strategy(),
             hand in cards_strategy(),
         ) {
             prop_assert!(Declaration::Napoli(suit).is_held_in(&with_cards(&hand, &napoli_cards(suit))));
-            let three = cards_of_rank(rank, Size::Three as usize);
-            let declaration = Declaration::Accuso { rank, size: Size::Three };
-            prop_assert!(declaration.is_held_in(&with_cards(&hand, &three)));
-            let four = cards_of_rank(rank, Size::Four as usize);
-            let declaration = Declaration::Accuso { rank, size: Size::Four };
+            let declaration = Declaration::ThreeOfAKind { rank, missing };
+            prop_assert!(declaration.is_held_in(&with_cards(&hand, &three_cards(rank, missing))));
+            let four = cards_of_rank(rank, Suit::ALL.len());
+            let declaration = Declaration::FourOfAKind(rank);
             prop_assert!(declaration.is_held_in(&with_cards(&hand, &four)));
         }
 
@@ -579,15 +591,16 @@ mod tests {
             prop_assert_eq!(Declaration::Napoli(suit).is_held_in(&hand), held);
         }
 
-        /// Three of a kind is declarable exactly when the hand holds at least
-        /// three cards of its rank.
+        /// Three of a kind is declarable exactly when the hand holds its rank
+        /// in every suit but the missing one.
         #[test]
-        fn three_of_a_kind_needs_three_cards_of_its_rank(
+        fn three_of_a_kind_needs_its_rank_in_every_other_suit(
             rank in declarable_rank_strategy(),
+            missing in suit_strategy(),
             hand in cards_strategy(),
         ) {
-            let expected = copies_of(&hand, rank) >= Size::Three as usize;
-            let declaration = Declaration::Accuso { rank, size: Size::Three };
+            let expected = three_cards(rank, missing).iter().all(|card| hand.contains(card));
+            let declaration = Declaration::ThreeOfAKind { rank, missing };
             prop_assert_eq!(declaration.is_held_in(&hand), expected);
         }
 
@@ -598,8 +611,8 @@ mod tests {
             rank in declarable_rank_strategy(),
             hand in cards_strategy(),
         ) {
-            let expected = copies_of(&hand, rank) >= Size::Four as usize;
-            let declaration = Declaration::Accuso { rank, size: Size::Four };
+            let expected = copies_of(&hand, rank) >= Suit::ALL.len();
+            let declaration = Declaration::FourOfAKind(rank);
             prop_assert_eq!(declaration.is_held_in(&hand), expected);
         }
 
@@ -609,15 +622,15 @@ mod tests {
         fn adding_a_card_never_removes_a_declaration(
             suit in suit_strategy(),
             rank in declarable_rank_strategy(),
+            missing in suit_strategy(),
             hand in cards_strategy(),
             extra in tressette_card_strategy(),
         ) {
-            let three = cards_of_rank(rank, Size::Three as usize);
-            let four = cards_of_rank(rank, Size::Four as usize);
+            let four = cards_of_rank(rank, Suit::ALL.len());
             for (declaration, set) in [
                 (Declaration::Napoli(suit), napoli_cards(suit)),
-                (Declaration::Accuso { rank, size: Size::Three }, three),
-                (Declaration::Accuso { rank, size: Size::Four }, four),
+                (Declaration::ThreeOfAKind { rank, missing }, three_cards(rank, missing)),
+                (Declaration::FourOfAKind(rank), four),
             ] {
                 let larger = with_cards(&with_cards(&hand, &set), &[extra]);
                 prop_assert!(declaration.is_held_in(&larger));
@@ -637,21 +650,22 @@ mod tests {
                 .iter()
                 .map(|&rank| TressetteCard::new(rank.into(), suit))
                 .collect();
-            prop_assert_eq!(declarable, by_strength[..Size::Three as usize].to_vec());
+            prop_assert_eq!(declarable, by_strength[..DeclarableRank::ALL.len()].to_vec());
         }
 
         /// The points depend only on the kind of declaration.
         #[test]
-        fn points_depend_only_on_the_kind(suit in suit_strategy(), rank in declarable_rank_strategy()) {
+        fn points_depend_only_on_the_kind(
+            suit in suit_strategy(),
+            rank in declarable_rank_strategy(),
+            missing in suit_strategy(),
+        ) {
             prop_assert_eq!(Declaration::Napoli(suit).points(), NAPOLI_POINTS);
             prop_assert_eq!(
-                Declaration::Accuso { rank, size: Size::Three }.points(),
+                Declaration::ThreeOfAKind { rank, missing }.points(),
                 THREE_OF_A_KIND_POINTS
             );
-            prop_assert_eq!(
-                Declaration::Accuso { rank, size: Size::Four }.points(),
-                FOUR_OF_A_KIND_POINTS
-            );
+            prop_assert_eq!(Declaration::FourOfAKind(rank).points(), FOUR_OF_A_KIND_POINTS);
         }
 
         /// A declaration in the window goes on exactly when the hand holds its
@@ -678,9 +692,9 @@ mod tests {
             declared in declarations_strategy(),
         ) {
             let hand = with_cards(&hand, &cards_of(declaration));
-            let already = match declaration {
-                Declaration::Napoli(_) => declared.contains(&declaration),
-                Declaration::Accuso { rank, .. } => accuso_declared(&declared, rank),
+            let already = match declaration.accuso_rank() {
+                None => declared.contains(&declaration),
+                Some(rank) => accuso_declared(&declared, rank),
             };
             let expected = if already {
                 Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::AlreadyDeclared })
@@ -702,7 +716,7 @@ mod tests {
             let hand = with_cards(&hand, &cards_of(declaration));
             let replaced_by_four = matches!(
                 declaration,
-                Declaration::Accuso { rank, size: Size::Three } if copies_of(&hand, rank) == Size::Four as usize
+                Declaration::ThreeOfAKind { rank, .. } if copies_of(&hand, rank) == Suit::ALL.len()
             );
             let expected = if replaced_by_four {
                 Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::ReplacedByFour })
