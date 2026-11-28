@@ -39,7 +39,12 @@ impl Seat {
     /// assert_eq!(Seat::East.next(), Seat::North);
     /// ```
     pub const fn next(self) -> Self {
-        self.after(1)
+        match self {
+            Self::North => Self::West,
+            Self::West => Self::South,
+            Self::South => Self::East,
+            Self::East => Self::North,
+        }
     }
 
     /// Returns the seat `steps` turns after this one.
@@ -50,9 +55,9 @@ impl Seat {
     /// assert_eq!(Seat::East.after(2), Seat::West);
     /// assert_eq!(Seat::East.after(4), Seat::East);
     /// ```
-    pub const fn after(self, steps: usize) -> Self {
-        // Reducing `steps` first keeps the sum from overflowing.
-        Self::ALL[(self.position() + steps % Self::ALL.len()) % Self::ALL.len()]
+    pub fn after(self, steps: usize) -> Self {
+        // Whole rounds of the table come back to the same seat.
+        (0..steps % Self::ALL.len()).fold(self, |seat, _| seat.next())
     }
 
     /// Returns the team this seat plays for.
@@ -67,16 +72,6 @@ impl Seat {
         match self {
             Self::North | Self::South => Team::NorthSouth,
             Self::East | Self::West => Team::EastWest,
-        }
-    }
-
-    /// Returns the seat's position in [`ALL`](Self::ALL).
-    const fn position(self) -> usize {
-        match self {
-            Self::North => 0,
-            Self::West => 1,
-            Self::South => 2,
-            Self::East => 3,
         }
     }
 }
@@ -262,50 +257,55 @@ pub mod test_utils {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::ensure;
     use proptest::prelude::*;
 
     use super::{PerSeat, Seat, test_utils::seat_strategy};
 
     #[test]
-    fn values_for_each_seat_are_built_in_play_order() {
+    fn values_for_each_seat_are_built_in_play_order() -> anyhow::Result<()> {
         let mut visited = Vec::new();
         let built = PerSeat::from_fn(|seat| {
             visited.push(seat);
             visited.len()
         });
-        assert_eq!(visited, Seat::ALL);
-        assert_eq!(built[Seat::West], 2);
+        ensure!(visited == Seat::ALL);
+        ensure!(built[Seat::West] == 2);
+        Ok(())
     }
 
     #[test]
-    fn play_order_goes_round_the_table() {
-        for (position, seat) in Seat::ALL.into_iter().enumerate() {
-            assert_eq!(seat.next(), Seat::ALL[(position + 1) % Seat::ALL.len()]);
+    fn play_order_goes_round_the_table() -> anyhow::Result<()> {
+        let following = Seat::ALL.into_iter().cycle().skip(1);
+        for (seat, after) in Seat::ALL.into_iter().zip(following) {
+            ensure!(seat.next() == after);
         }
+        Ok(())
     }
 
     /// Even the largest numbers of turns land where the leftover turns,
     /// after whole rounds of the table, lead.
     #[test]
-    fn after_goes_round_the_table_however_far() {
+    fn after_goes_round_the_table_however_far() -> anyhow::Result<()> {
         for seat in Seat::ALL {
             for back in 0..8 {
                 let steps = usize::MAX - back;
-                assert_eq!(
-                    seat.after(steps),
-                    seat.after(steps % 4),
+                ensure!(
+                    seat.after(steps) == seat.after(steps % 4),
                     "{seat} after {steps}"
                 );
             }
         }
+        Ok(())
     }
 
     #[test]
-    fn partners_sit_two_turns_apart() {
+    fn partners_sit_two_turns_apart() -> anyhow::Result<()> {
         for seat in Seat::ALL {
-            assert_eq!(seat.after(2).team(), seat.team());
-            assert_ne!(seat.next().team(), seat.team());
+            ensure!(seat.after(2).team() == seat.team());
+            ensure!(seat.next().team() != seat.team());
         }
+        Ok(())
     }
 
     proptest! {

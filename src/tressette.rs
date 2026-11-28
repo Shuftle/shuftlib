@@ -48,7 +48,7 @@
 //!         // Tressette waits on one seat at a time, and it picks one of its
 //!         // legal actions: a card, a declaration, or a lead with a signal.
 //!         Status::ToAct(seats) => {
-//!             let seat = seats[0];
+//!             let seat = *seats.first().ok_or("nobody to act")?;
 //!             let legal = session.observe(seat).legal_actions();
 //!             let action = *legal.choose(&mut rng).ok_or("no legal action")?;
 //!             session.act(seat, action)?;
@@ -684,7 +684,7 @@ impl Game for Tressette {
         }
         let dealer = match self.dealer {
             Some(previous) => previous.next(),
-            None => Seat::ALL[rng.random_range(0..Seat::ALL.len())],
+            None => Seat::North.after(rng.random_range(0..Seat::ALL.len())),
         };
         Some(Deal::shuffled(dealer, rng))
     }
@@ -820,10 +820,9 @@ pub mod test_utils {
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches;
-
-    use proptest::prelude::*;
-    use rand::{SeedableRng, rngs::StdRng};
+    use anyhow::{Context, ensure};
+    use proptest::{prelude::*, test_runner::TestCaseError};
+    use rand::{SeedableRng, rngs::StdRng, seq::IndexedRandom};
 
     use super::*;
     use crate::{
@@ -883,13 +882,13 @@ mod tests {
     }
 
     /// Returns the seat the game is waiting on, checking there's only one.
-    fn to_act(session: &Session<Tressette>) -> Option<Seat> {
+    fn to_act(session: &Session<Tressette>) -> anyhow::Result<Option<Seat>> {
         let status = session.status();
-        assert!(
+        ensure!(
             status.to_act().len() <= 1,
             "{status:?} waits on several seats"
         );
-        status.to_act().first().copied()
+        Ok(status.to_act().first().copied())
     }
 
     fn play(
@@ -902,20 +901,24 @@ mod tests {
 
     /// Plays the first legal action until the hand is over, and returns the
     /// public events of every action.
-    fn play_hand(session: &mut Session<Tressette>) -> Vec<Event> {
+    fn play_hand(session: &mut Session<Tressette>) -> anyhow::Result<Vec<Event>> {
         let mut events = Vec::new();
         let mut actions = 0;
-        while let Some(seat) = to_act(session) {
+        while let Some(seat) = to_act(session)? {
             actions += 1;
-            assert!(actions <= MAX_HAND_ACTIONS, "the hand never ends");
-            let action = session.observe(seat).legal_actions()[0];
-            events.extend(session.act(seat, action).unwrap().public_only().cloned());
+            ensure!(actions <= MAX_HAND_ACTIONS, "the hand never ends");
+            let action = *session
+                .observe(seat)
+                .legal_actions()
+                .first()
+                .context("the seat to act has a legal action")?;
+            events.extend(session.act(seat, action)?.public_only().cloned());
         }
-        events
+        Ok(events)
     }
 
     #[test]
-    fn the_led_suit_must_be_followed_even_after_a_discard() {
+    fn the_led_suit_must_be_followed_even_after_a_discard() -> anyhow::Result<()> {
         let mut session = playing(PerSeat {
             west: vec![card(ItalianRank::King, Suit::Cups)],
             south: vec![card(ItalianRank::Five, Suit::Coins)],
@@ -929,54 +932,49 @@ mod tests {
             &mut session,
             Seat::West,
             card(ItalianRank::King, Suit::Cups),
-        )
-        .unwrap();
+        )?;
         // South can't follow and discards a Coin: East must still follow Cups.
         play(
             &mut session,
             Seat::South,
             card(ItalianRank::Five, Suit::Coins),
-        )
-        .unwrap();
+        )?;
 
         let view = session.observe(Seat::East);
-        assert_eq!(
-            view.legal_actions(),
-            [Action::Play(card(ItalianRank::Six, Suit::Cups))]
-        );
+        ensure!(view.legal_actions() == [Action::Play(card(ItalianRank::Six, Suit::Cups))]);
         let before = session.clone();
-        assert_eq!(
+        ensure!(
             play(
                 &mut session,
                 Seat::East,
                 card(ItalianRank::Seven, Suit::Coins)
-            ),
-            Err(ActError::Illegal(Error::MustFollowSuit {
+            ) == Err(ActError::Illegal(Error::MustFollowSuit {
                 card: card(ItalianRank::Seven, Suit::Coins),
                 required: Suit::Cups,
             }))
         );
-        assert_eq!(session, before);
-        play(&mut session, Seat::East, card(ItalianRank::Six, Suit::Cups)).unwrap();
+        ensure!(session == before);
+        play(&mut session, Seat::East, card(ItalianRank::Six, Suit::Cups))?;
+        Ok(())
     }
 
     #[test]
-    fn cards_not_in_hand_are_rejected_before_suit_is_checked() {
+    fn cards_not_in_hand_are_rejected_before_suit_is_checked() -> anyhow::Result<()> {
         let mut session = playing(by_suit());
         play(
             &mut session,
             Seat::West,
             card(ItalianRank::Ace, Suit::Clubs),
-        )
-        .unwrap();
+        )?;
         let before = session.clone();
         // South holds only Swords: a Coin is both foreign and off suit.
         let foreign = card(ItalianRank::Ace, Suit::Coins);
-        assert_eq!(
-            play(&mut session, Seat::South, foreign),
-            Err(ActError::Illegal(Error::CardNotInHand { card: foreign }))
+        ensure!(
+            play(&mut session, Seat::South, foreign)
+                == Err(ActError::Illegal(Error::CardNotInHand { card: foreign }))
         );
-        assert_eq!(session, before);
+        ensure!(session == before);
+        Ok(())
     }
 
     /// Returns the team that has won with `score`, if any.
@@ -1064,18 +1062,21 @@ mod tests {
         ) {
             let deal = Deal::shuffled(Seat::North, &mut StdRng::seed_from_u64(seed));
             let mut hands = deal.hands().clone();
+            let missing = |position: usize| TestCaseError::fail(format!("no card at {position}"));
+            let picked = *hands[from].get(card).ok_or_else(|| missing(card))?;
             match mistake {
                 0 => {
                     prop_assume!(from != to);
-                    let moved = hands[from].remove(card);
-                    hands[to].push(moved);
+                    hands[from].retain(|held| *held != picked);
+                    hands[to].push(picked);
                 }
                 1 => {
-                    hands[from].remove(card);
+                    hands[from].retain(|held| *held != picked);
                 }
                 _ => {
                     prop_assume!(from != to || card != other);
-                    hands[from][card] = hands[to][other];
+                    let copy = *hands[to].get(other).ok_or_else(|| missing(other))?;
+                    *hands[from].get_mut(card).ok_or_else(|| missing(card))? = copy;
                 }
             }
             prop_assert_eq!(Deal::new(deal.dealer(), hands), Err(IncompleteDeal));
@@ -1106,85 +1107,88 @@ mod tests {
     }
 
     #[test]
-    fn drawn_deals_pass_on_and_the_next_seat_leads() {
+    fn drawn_deals_pass_on_and_the_next_seat_leads() -> anyhow::Result<()> {
         let mut rng = StdRng::seed_from_u64(9);
         let mut session = Session::<Tressette>::new(Config::default());
-        session.resolve_chance(&mut rng).unwrap();
-        let first = session.observe(Seat::North).dealer().unwrap();
-        assert_eq!(to_act(&session), Some(first.next()));
-        play_hand(&mut session);
+        session.resolve_chance(&mut rng)?;
+        let first = session
+            .observe(Seat::North)
+            .dealer()
+            .context("a hand was dealt")?;
+        ensure!(to_act(&session)? == Some(first.next()));
+        play_hand(&mut session)?;
 
-        let update = session.resolve_chance(&mut rng).unwrap();
+        let update = session.resolve_chance(&mut rng)?;
         let second = first.next();
-        assert_eq!(
-            update.public_only().collect::<Vec<_>>(),
-            [&Event::HandDealt { dealer: second }]
-        );
-        assert_eq!(to_act(&session), Some(second.next()));
+        ensure!(update.public_only().collect::<Vec<_>>() == [&Event::HandDealt { dealer: second }]);
+        ensure!(to_act(&session)? == Some(second.next()));
+        Ok(())
     }
 
     #[test]
-    fn forfeiting_loses_the_game_for_the_team() {
+    fn forfeiting_loses_the_game_for_the_team() -> anyhow::Result<()> {
         let mut session = playing(by_suit());
         // West is to play, but any seat may forfeit.
-        assert_eq!(to_act(&session), Some(Seat::West));
-        let update = session.forfeit(Seat::South).unwrap();
-        assert_eq!(
-            update.public_only().collect::<Vec<_>>(),
-            [
-                &Event::Forfeited { seat: Seat::South },
-                &Event::GameWon {
-                    winner: Team::EastWest
-                },
-            ]
+        ensure!(to_act(&session)? == Some(Seat::West));
+        let update = session.forfeit(Seat::South)?;
+        ensure!(
+            update.public_only().collect::<Vec<_>>()
+                == [
+                    &Event::Forfeited { seat: Seat::South },
+                    &Event::GameWon {
+                        winner: Team::EastWest
+                    },
+                ]
         );
-        assert_eq!(
-            session.status(),
-            Status::Over(Outcome {
-                winner: Team::EastWest,
-                score: PerTeam::default(),
-                forfeited: Some(Seat::South),
-            })
+        ensure!(
+            session.status()
+                == Status::Over(Outcome {
+                    winner: Team::EastWest,
+                    score: PerTeam::default(),
+                    forfeited: Some(Seat::South),
+                })
         );
 
         // Between hands too.
         let mut session = Session::<Tressette>::new(Config::default());
-        session.forfeit(Seat::East).unwrap();
-        assert_matches!(
+        session.forfeit(Seat::East)?;
+        ensure!(matches!(
             session.status(),
             Status::Over(Outcome {
                 winner: Team::NorthSouth,
                 ..
             })
-        );
+        ));
+        Ok(())
     }
 
     #[test]
-    fn deals_can_be_given_and_are_checked() {
+    fn deals_can_be_given_and_are_checked() -> anyhow::Result<()> {
         let deal = |dealer| Deal {
             dealer,
             hands: by_suit(),
         };
         let mut session = Session::<Tressette>::new(Config::default());
-        session.resolve_chance_with(deal(Seat::North)).unwrap();
-        assert_eq!(session.observe(Seat::South).hand(), suit(Suit::Swords));
-        assert_eq!(to_act(&session), Some(Seat::West));
-        play_hand(&mut session);
+        session.resolve_chance_with(deal(Seat::North))?;
+        ensure!(session.observe(Seat::South).hand() == suit(Suit::Swords));
+        ensure!(to_act(&session)? == Some(Seat::West));
+        play_hand(&mut session)?;
 
         // The deal passes on from North to West.
         let before = session.clone();
-        assert_eq!(
-            session.resolve_chance_with(deal(Seat::South)),
-            Err(ChanceError::Illegal(Error::WrongDealer {
-                expected: Seat::West
-            }))
+        ensure!(
+            session.resolve_chance_with(deal(Seat::South))
+                == Err(ChanceError::Illegal(Error::WrongDealer {
+                    expected: Seat::West
+                }))
         );
-        assert_eq!(session, before);
-        session.resolve_chance_with(deal(Seat::West)).unwrap();
+        ensure!(session == before);
+        session.resolve_chance_with(deal(Seat::West))?;
+        Ok(())
     }
 
     #[test]
-    fn the_deck_is_dealt_in_fives_from_the_seat_after_the_dealer() {
+    fn the_deck_is_dealt_in_fives_from_the_seat_after_the_dealer() -> anyhow::Result<()> {
         let cards = |suit, ranks: [ItalianRank; 5]| ranks.map(|rank| card(rank, suit));
         let high = [
             ItalianRank::King,
@@ -1207,37 +1211,38 @@ mod tests {
         let hand = |first: [TressetteCard; 5], second: [TressetteCard; 5]| {
             first.into_iter().chain(second).collect::<Vec<_>>()
         };
-        assert_eq!(
-            deal.hands,
-            PerSeat {
-                north: hand(cards(Suit::Clubs, high), cards(Suit::Cups, high)),
-                west: hand(cards(Suit::Clubs, low), cards(Suit::Cups, low)),
-                south: hand(cards(Suit::Swords, high), cards(Suit::Coins, high)),
-                east: hand(cards(Suit::Swords, low), cards(Suit::Coins, low)),
-            }
+        ensure!(
+            deal.hands
+                == PerSeat {
+                    north: hand(cards(Suit::Clubs, high), cards(Suit::Cups, high)),
+                    west: hand(cards(Suit::Clubs, low), cards(Suit::Cups, low)),
+                    south: hand(cards(Suit::Swords, high), cards(Suit::Coins, high)),
+                    east: hand(cards(Suit::Swords, low), cards(Suit::Coins, low)),
+                }
         );
+        Ok(())
     }
 
     /// Tricks are decided by comparing cards, so the order must be a total
     /// order that agrees with equality.
     #[test]
-    fn cards_are_ordered_consistently_with_equality() {
+    fn cards_are_ordered_consistently_with_equality() -> anyhow::Result<()> {
         let cards: Vec<_> = deck().into_iter().collect();
         for &a in &cards {
             for &b in &cards {
-                assert_eq!(
-                    a.cmp(&b) == std::cmp::Ordering::Equal,
-                    a == b,
+                ensure!(
+                    (a.cmp(&b) == std::cmp::Ordering::Equal) == (a == b),
                     "{a} and {b}"
                 );
-                assert_eq!(a.cmp(&b), b.cmp(&a).reverse(), "{a} and {b}");
+                ensure!(a.cmp(&b) == b.cmp(&a).reverse(), "{a} and {b}");
                 for &c in &cards {
                     if a < b && b < c {
-                        assert!(a < c, "{a} < {b} < {c}");
+                        ensure!(a < c, "{a} < {b} < {c}");
                     }
                 }
             }
         }
+        Ok(())
     }
 
     /// What one seat knows, rebuilt from nothing but the events it receives
@@ -1258,7 +1263,7 @@ mod tests {
     }
 
     impl Tracker {
-        fn apply(&mut self, viewer: Option<Seat>, event: &Event) {
+        fn apply(&mut self, viewer: Option<Seat>, event: &Event) -> Result<(), TestCaseError> {
             match event {
                 Event::HandDealt { dealer } => {
                     *self = Self {
@@ -1271,10 +1276,17 @@ mod tests {
                 Event::CardsReceived { cards } => self.hand.clone_from(cards),
                 Event::CardPlayed { seat: player, card } => {
                     if Some(*player) == viewer {
-                        let position = self.hand.iter().position(|held| held == card).unwrap();
+                        let position = self
+                            .hand
+                            .iter()
+                            .position(|held| held == card)
+                            .ok_or_else(|| TestCaseError::fail("the seat played a card it held"))?;
                         self.hand.remove(position);
                     }
-                    self.hand_sizes[*player] -= 1;
+                    let size = &mut self.hand_sizes[*player];
+                    *size = size
+                        .checked_sub(1)
+                        .ok_or_else(|| TestCaseError::fail("the seat played a card it held"))?;
                     self.trick.push((*player, *card));
                 }
                 Event::Signalled {
@@ -1282,12 +1294,12 @@ mod tests {
                     signal,
                 } => {
                     let leader = self.trick.first().map(|&(leader, _)| leader);
-                    assert_eq!((self.trick.len(), leader), (1, Some(*player)));
+                    prop_assert_eq!((self.trick.len(), leader), (1, Some(*player)));
                     self.signal = Some(*signal);
                 }
                 Event::TrickTaken { trick } => {
-                    assert_eq!(trick.plays().collect::<Vec<_>>(), self.trick);
-                    assert_eq!(trick.signal(), self.signal);
+                    prop_assert_eq!(&trick.plays().collect::<Vec<_>>(), &self.trick);
+                    prop_assert_eq!(trick.signal(), self.signal);
                     self.trick.clear();
                     self.signal = None;
                     self.tricks_taken[trick.taker().team()] += 1;
@@ -1312,36 +1324,39 @@ mod tests {
                     seat: player,
                     declaration,
                 } => {
-                    let seen = if Some(*player) == viewer {
-                        DeclarationSeen::Exact(
-                            self.made.take().expect("the seat knows what it declared"),
-                        )
-                    } else {
-                        *declaration
-                    };
+                    let seen =
+                        if Some(*player) == viewer {
+                            DeclarationSeen::Exact(self.made.take().ok_or_else(|| {
+                                TestCaseError::fail("the seat made a declaration")
+                            })?)
+                        } else {
+                            *declaration
+                        };
                     self.declared[*player].push(seen);
                 }
                 Event::GameWon { .. } => {}
             }
+            Ok(())
         }
 
-        fn assert_matches(&self, view: &View) {
-            assert_eq!(view.hand(), self.hand);
-            assert_eq!(view.hand_sizes(), self.hand_sizes);
-            assert_eq!(view.last_trick(), self.last_trick.as_ref());
-            assert_eq!(view.tricks_taken(), self.tricks_taken);
-            assert_eq!(view.score(), self.score);
-            assert_eq!(view.dealer(), self.dealer);
+        fn check_matches(&self, view: &View) -> Result<(), TestCaseError> {
+            prop_assert_eq!(view.hand(), self.hand.as_slice());
+            prop_assert_eq!(view.hand_sizes(), self.hand_sizes);
+            prop_assert_eq!(view.last_trick(), self.last_trick.as_ref());
+            prop_assert_eq!(view.tricks_taken(), self.tricks_taken);
+            prop_assert_eq!(view.score(), self.score);
+            prop_assert_eq!(view.dealer(), self.dealer);
             let trick: Vec<_> = view.trick().map_or_default(|trick| trick.plays().collect());
-            assert_eq!(trick, self.trick);
-            assert_eq!(view.trick().and_then(Trick::signal), self.signal);
-            assert_eq!(view.declared(), &self.declared);
+            prop_assert_eq!(&trick, &self.trick);
+            prop_assert_eq!(view.trick().and_then(Trick::signal), self.signal);
+            prop_assert_eq!(view.declared(), &self.declared);
+            Ok(())
         }
     }
 
     /// Every card of a hand in progress is in exactly one place: a hand, a
     /// team's pile or the trick.
-    fn assert_cards_conserved(hand: &Hand) {
+    fn check_cards_conserved(hand: &Hand) -> Result<(), TestCaseError> {
         let places: Vec<TressetteCard> = Seat::ALL
             .iter()
             .flat_map(|&seat| hand.cards[seat].iter().copied())
@@ -1353,13 +1368,17 @@ mod tests {
             .chain(hand.trick.plays().map(|(_, card)| card))
             .collect();
         let distinct: HashSet<_> = places.iter().copied().collect();
-        assert_eq!(places.len(), 40);
-        assert_eq!(distinct.len(), 40);
+        prop_assert_eq!(places.len(), 40);
+        prop_assert_eq!(distinct.len(), 40);
+        Ok(())
     }
 
     /// Checks that the actions `seat` may take are exactly the ones the game
     /// accepts, and that rejected ones leave it unchanged.
-    fn assert_legality_is_exact(session: &Session<Tressette>, seat: Seat) {
+    fn check_legality_is_exact(
+        session: &Session<Tressette>,
+        seat: Seat,
+    ) -> Result<(), TestCaseError> {
         let legal = session.observe(seat).legal_actions();
         let leads = deck().into_iter().flat_map(|card| {
             Signal::ALL
@@ -1374,23 +1393,34 @@ mod tests {
         for action in actions {
             let mut attempt = session.clone();
             match attempt.act(seat, action) {
-                Ok(_) => assert!(legal.contains(&action), "{action:?} was accepted"),
+                Ok(_) => prop_assert!(legal.contains(&action), "{action:?} was accepted"),
                 Err(ActError::Illegal(_)) => {
-                    assert!(!legal.contains(&action), "{action:?} was rejected");
-                    assert_eq!(&attempt, session);
+                    prop_assert!(!legal.contains(&action), "{action:?} was rejected");
+                    prop_assert_eq!(&attempt, session);
                 }
-                Err(error) => panic!("unexpected error {error:?}"),
+                Err(error) => {
+                    return Err(TestCaseError::fail(format!("unexpected error {error:?}")));
+                }
             }
         }
         for other in Seat::ALL.into_iter().filter(|&other| other != seat) {
-            assert!(session.observe(other).legal_actions().is_empty());
+            prop_assert!(session.observe(other).legal_actions().is_empty());
         }
+        Ok(())
     }
 
     /// Checks that `seat` is offered exactly the declarations it may still
     /// make, and only on the tricks `config` allows.
-    fn assert_declarable_is_exact(session: &Session<Tressette>, config: Config, seat: Seat) {
-        let hand = session.game().phase.hand().unwrap();
+    fn check_declarable_is_exact(
+        session: &Session<Tressette>,
+        config: Config,
+        seat: Seat,
+    ) -> Result<(), TestCaseError> {
+        let hand = session
+            .game()
+            .phase
+            .hand()
+            .ok_or_else(|| TestCaseError::fail("a hand is in progress"))?;
         // The seat to act has played one card per completed trick.
         let trick = HAND_SIZE - hand.cards[seat].len() + 1;
         let expected = declaration::allowed(&declaration::Context {
@@ -1399,20 +1429,26 @@ mod tests {
             hand: &hand.cards[seat],
             declared: &hand.declared[seat],
         });
-        assert_eq!(session.observe(seat).declarable(), expected);
+        let view = session.observe(seat);
+        prop_assert_eq!(view.declarable(), expected);
+        Ok(())
     }
 
     /// Checks that `seat` is offered a signalled lead exactly when it leads the
     /// trick with a signal that's allowed and true, given the suits it already
     /// `signalled` and the suits already `led`.
-    fn assert_signals_are_exact(
+    fn check_signals_are_exact(
         session: &Session<Tressette>,
         config: Config,
         seat: Seat,
         signalled: PerSuit<bool>,
         led: PerSuit<bool>,
-    ) {
-        let hand = session.game().phase.hand().unwrap();
+    ) -> Result<(), TestCaseError> {
+        let hand = session
+            .game()
+            .phase
+            .hand()
+            .ok_or_else(|| TestCaseError::fail("a hand is in progress"))?;
         let held = &hand.cards[seat];
         let context = signal::Context {
             rules: config.signals,
@@ -1440,78 +1476,91 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(offered, expected);
-        assert_eq!(
+        prop_assert_eq!(&offered, &expected);
+        prop_assert_eq!(
             view.leads().iter().copied().collect::<HashSet<_>>(),
             expected
         );
+        Ok(())
     }
 
     /// Checks that `action` by `seat` told everyone which card was played,
     /// followed by its signal when it led with one.
-    fn assert_card_event(seat: Seat, action: Action, update: &UpdateOf<Tressette>) {
+    fn check_card_event(
+        seat: Seat,
+        action: Action,
+        update: &UpdateOf<Tressette>,
+    ) -> Result<(), TestCaseError> {
         let cards: Vec<_> = update
             .public_only()
             .filter(|event| matches!(event, Event::CardPlayed { .. } | Event::Signalled { .. }))
             .collect();
         match action {
-            Action::Play(card) => assert_eq!(cards, [&Event::CardPlayed { seat, card }]),
-            Action::Lead { card, signal } => assert_eq!(
+            Action::Play(card) => prop_assert_eq!(cards, [&Event::CardPlayed { seat, card }]),
+            Action::Lead { card, signal } => prop_assert_eq!(
                 cards,
                 [
                     &Event::CardPlayed { seat, card },
                     &Event::Signalled { seat, signal }
                 ]
             ),
-            Action::Declare(_) => assert!(cards.is_empty()),
+            Action::Declare(_) => prop_assert!(cards.is_empty()),
         }
+        Ok(())
     }
 
     /// Checks that declaring `declaration` told everyone its points, and
     /// which one it was only when `config` says so, and that `seat` kept the
     /// turn.
-    fn assert_declared(
+    fn check_declared(
         session: &Session<Tressette>,
         config: Config,
         seat: Seat,
         declaration: Declaration,
         update: &UpdateOf<Tressette>,
-    ) {
+    ) -> Result<(), TestCaseError> {
         let seen = match config.declarations.visibility {
             Visibility::Exact => DeclarationSeen::Exact(declaration),
             Visibility::Anonymous => DeclarationSeen::Hidden {
                 points: declaration.points(),
             },
         };
-        assert_eq!(
+        prop_assert_eq!(
             update.public_only().collect::<Vec<_>>(),
             [&Event::Declared {
                 seat,
                 declaration: seen,
             }]
         );
-        assert_eq!(to_act(session), Some(seat));
+        let status = session.status();
+        prop_assert_eq!(status.to_act(), [seat]);
+        Ok(())
     }
 
     /// Checks that a hand is worth eleven points plus the declarations of
     /// every team that scored from its tricks: a team that didn't scores
     /// nothing at all.
-    fn assert_hand_points(points: PerTeam<u8>, declared: PerTeam<u8>) {
+    fn check_hand_points(points: PerTeam<u8>, declared: PerTeam<u8>) -> Result<(), TestCaseError> {
         let counted: u8 = Team::ALL
             .iter()
             .filter(|&&team| points[team] > 0)
             .map(|&team| declared[team])
             .sum();
-        assert_eq!(points.north_south + points.east_west, 11 + counted);
+        prop_assert_eq!(points.north_south + points.east_west, 11 + counted);
         for team in Team::ALL {
-            assert!(points[team] == 0 || points[team] > declared[team]);
+            prop_assert!(points[team] == 0 || points[team] > declared[team]);
         }
+        Ok(())
     }
 
     /// Plays a whole game under `config` with deals drawn from `deals` and
     /// random legal actions from `choices`, plus the odd forfeit, checking
     /// invariants along the way, and returns it.
-    fn play_out(config: Config, deals: u64, choices: u64) -> Session<Tressette> {
+    fn play_out(
+        config: Config,
+        deals: u64,
+        choices: u64,
+    ) -> Result<Session<Tressette>, TestCaseError> {
         let mut deals = StdRng::seed_from_u64(deals);
         let mut choices = StdRng::seed_from_u64(choices);
         let mut session = Session::<Tressette>::new(config);
@@ -1523,27 +1572,33 @@ mod tests {
         let mut led = PerSuit::<bool>::default();
         loop {
             let update = match session.status() {
-                Status::Chance => session.resolve_chance(&mut deals).unwrap(),
+                Status::Chance => session.resolve_chance(&mut deals)?,
                 Status::ToAct(seats) => {
                     let [seat] = seats[..] else {
-                        panic!("{seats:?} are waited on together");
+                        return Err(TestCaseError::fail(format!(
+                            "{seats:?} are waited on together"
+                        )));
                     };
-                    assert_legality_is_exact(&session, seat);
-                    assert_declarable_is_exact(&session, config, seat);
-                    assert_signals_are_exact(&session, config, seat, signalled[seat], led);
+                    check_legality_is_exact(&session, seat)?;
+                    check_declarable_is_exact(&session, config, seat)?;
+                    check_signals_are_exact(&session, config, seat, signalled[seat], led)?;
                     if choices.random_ratio(1, 500) {
-                        let quitter = Seat::ALL[choices.random_range(0..Seat::ALL.len())];
-                        session.forfeit(quitter).unwrap()
+                        let quitter = *Seat::ALL
+                            .choose(&mut choices)
+                            .ok_or_else(|| TestCaseError::fail("the table has seats"))?;
+                        session.forfeit(quitter)?
                     } else {
                         hand_actions += 1;
-                        assert!(hand_actions <= MAX_HAND_ACTIONS, "the hand never ends");
+                        prop_assert!(hand_actions <= MAX_HAND_ACTIONS, "the hand never ends");
                         let legal = session.observe(seat).legal_actions();
-                        let action = legal[choices.random_range(0..legal.len())];
+                        let action = *legal.choose(&mut choices).ok_or_else(|| {
+                            TestCaseError::fail("the seat to act has a legal action")
+                        })?;
                         let leading = session
                             .observe(seat)
                             .trick()
                             .is_some_and(|trick| trick.led_suit().is_none());
-                        let update = session.act(seat, action).unwrap();
+                        let update = session.act(seat, action)?;
                         if let (true, Action::Play(card) | Action::Lead { card, .. }) =
                             (leading, action)
                         {
@@ -1552,9 +1607,9 @@ mod tests {
                         if let Action::Lead { card, .. } = action {
                             signalled[seat][card.suit()] = true;
                         }
-                        assert_card_event(seat, action, &update);
+                        check_card_event(seat, action, &update)?;
                         if let Action::Declare(declaration) = action {
-                            assert_declared(&session, config, seat, declaration, &update);
+                            check_declared(&session, config, seat, declaration, &update)?;
                             trackers[seat].made = Some(declaration);
                         }
                         update
@@ -1566,22 +1621,23 @@ mod tests {
                     forfeited,
                 }) => {
                     match forfeited {
-                        Some(seat) => assert_eq!(winner, seat.team().opponent()),
+                        Some(seat) => prop_assert_eq!(winner, seat.team().opponent()),
                         None => {
-                            assert!(score[winner] >= SCORE_TO_WIN);
-                            assert!(score[winner] > score[winner.opponent()]);
+                            prop_assert!(score[winner] >= SCORE_TO_WIN);
+                            prop_assert!(score[winner] > score[winner.opponent()]);
                         }
                     }
-                    return session;
+                    return Ok(session);
                 }
             };
 
-            assert_eq!(update.step() + 1, session.steps());
+            prop_assert_eq!(update.step() + 1, session.steps());
             for (audience, event) in update.events().iter() {
-                assert_eq!(
+                prop_assert_eq!(
                     *audience == Audience::Everyone,
                     !matches!(event, Event::CardsReceived { .. }),
-                    "{event:?} has the wrong audience"
+                    "{:?} has the wrong audience",
+                    event
                 );
                 match event {
                     Event::HandDealt { .. } => {
@@ -1593,22 +1649,22 @@ mod tests {
                     Event::Declared { seat, declaration } => {
                         declared[seat.team()] += declaration.points();
                     }
-                    Event::HandScored { points, .. } => assert_hand_points(*points, declared),
+                    Event::HandScored { points, .. } => check_hand_points(*points, declared)?,
                     _ => {}
                 }
             }
             for seat in Seat::ALL {
                 for event in update.for_seat(seat) {
-                    trackers[seat].apply(Some(seat), event);
+                    trackers[seat].apply(Some(seat), event)?;
                 }
-                trackers[seat].assert_matches(&session.observe(seat));
+                trackers[seat].check_matches(&session.observe(seat))?;
             }
             for event in update.public_only() {
-                spectator.apply(None, event);
+                spectator.apply(None, event)?;
             }
-            spectator.assert_matches(&session.spectate());
+            spectator.check_matches(&session.spectate())?;
             if let Some(hand) = session.game().phase.hand() {
-                assert_cards_conserved(hand);
+                check_cards_conserved(hand)?;
             }
         }
     }
@@ -1623,8 +1679,8 @@ mod tests {
         /// what its events told it, and the log replays into the same game.
         #[test]
         fn random_games_follow_the_rules_and_replay(config in config_strategy(), deals: u64, choices: u64) {
-            let session = play_out(config, deals, choices);
-            let replay = Session::<Tressette>::replay(config, session.log().to_vec()).unwrap();
+            let session = play_out(config, deals, choices)?;
+            let replay = Session::<Tressette>::replay(config, session.log().to_vec())?;
             prop_assert_eq!(replay, session);
         }
     }

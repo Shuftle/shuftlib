@@ -278,7 +278,8 @@ pub mod test_utils {
 
 #[cfg(test)]
 mod tests {
-    use proptest::{prelude::*, sample};
+    use anyhow::ensure;
+    use proptest::{prelude::*, sample, test_runner::TestCaseError};
 
     use super::{
         test_utils::{played, trick_strategy},
@@ -294,17 +295,15 @@ mod tests {
     }
 
     #[test]
-    fn plays_are_attributed_from_the_leader() {
+    fn plays_are_attributed_from_the_leader() -> anyhow::Result<()> {
         let mut trick = Trick::new(Seat::West);
         let ace = card(ItalianRank::Ace, Suit::Clubs);
         let two = card(ItalianRank::Two, Suit::Clubs);
-        assert_eq!(trick.play(played(ace)), None);
-        assert_eq!(trick.play(played(two)), None);
-        assert_eq!(
-            trick.plays().collect::<Vec<_>>(),
-            [(Seat::West, ace), (Seat::South, two)]
-        );
-        assert_eq!(trick.led_suit(), Some(Suit::Clubs));
+        ensure!(trick.play(played(ace)).is_none());
+        ensure!(trick.play(played(two)).is_none());
+        ensure!(trick.plays().collect::<Vec<_>>() == [(Seat::West, ace), (Seat::South, two)]);
+        ensure!(trick.led_suit() == Some(Suit::Clubs));
+        Ok(())
     }
 
     proptest! {
@@ -316,12 +315,18 @@ mod tests {
             cards in sample::subsequence(deck().into_iter().collect::<Vec<_>>(), 4).prop_shuffle(),
         ) {
             let mut trick = Trick::new(leader);
-            let completed = cards.iter().find_map(|&card| trick.play(played(card))).unwrap();
-            let led = cards[0].suit();
+            let completed = cards
+                .iter()
+                .find_map(|&card| trick.play(played(card)))
+                .ok_or_else(|| TestCaseError::fail("four cards complete the trick"))?;
+            let led = cards
+                .first()
+                .ok_or_else(|| TestCaseError::fail("four cards were drawn"))?
+                .suit();
             let (_, taken_with) = completed
                 .plays()
                 .find(|&(seat, _)| seat == completed.taker())
-                .unwrap();
+                .ok_or_else(|| TestCaseError::fail("the taker played"))?;
             prop_assert_eq!(taken_with.suit(), led);
             for card in cards.iter().filter(|card| card.suit() == led) {
                 prop_assert!(*card <= taken_with, "{card} beats {taken_with}");
@@ -352,7 +357,7 @@ mod tests {
                 Some(required) => Err(Error::MustFollowSuit { card, required }),
                 None => Ok(()),
             };
-            let held = Held::new(card, &hand).expect("the card is in the hand");
+            let held = Held::new(card, &hand)?;
             prop_assert_eq!(held.follow(&trick).map(|_| ()), expected);
         }
     }

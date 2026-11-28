@@ -241,15 +241,18 @@ pub mod test_utils {
 mod tests {
     use std::collections::HashSet;
 
+    use anyhow::ensure;
+
     use crate::cards::deck::Deck;
 
     #[test]
-    fn the_deck_has_forty_distinct_cards_with_distinct_names() {
+    fn the_deck_has_forty_distinct_cards_with_distinct_names() -> anyhow::Result<()> {
         let deck = Deck::italian();
         let cards: HashSet<_> = deck.iter().copied().collect();
         let names: HashSet<_> = deck.iter().map(ToString::to_string).collect();
-        assert_eq!(deck.len(), 40);
-        assert_eq!(cards.len(), 40);
-        assert_eq!(names.len(), 40);
+        ensure!(deck.len() == 40);
+        ensure!(cards.len() == 40);
+        ensure!(names.len() == 40);
+        Ok(())
     }
 }

@@ -345,6 +345,7 @@ mod tests {
     use crate::cards::italian::ItalianRank;
     use crate::cards::italian::test_utils::per_suit_strategy;
     use crate::tressette::{Seat, test_utils::hand_strategy};
+    use anyhow::ensure;
     use proptest::{prelude::*, sample::Index};
 
     /// Returns the cards of `hand` in `lead`'s suit, other than `lead`.
@@ -356,37 +357,36 @@ mod tests {
     }
 
     /// Returns `lead`, a card of `hand`, as the opening of an empty trick.
-    fn opening(lead: TressetteCard, hand: &[TressetteCard]) -> Opening<'_> {
-        Held::new(lead, hand)
-            .and_then(|held| held.open(&Trick::new(Seat::North)))
-            .expect("the lead is in the hand, and the trick is empty")
+    fn opening(lead: TressetteCard, hand: &[TressetteCard]) -> Result<Opening<'_>, Error> {
+        Held::new(lead, hand)?.open(&Trick::new(Seat::North))
     }
 
     /// Returns whether the leader holding `hand` may lead `lead` with
     /// `signal` when every signal is allowed and none was given before.
-    fn matches(lead: TressetteCard, hand: &[TressetteCard], signal: Signal) -> bool {
+    fn matches(lead: TressetteCard, hand: &[TressetteCard], signal: Signal) -> Result<bool, Error> {
         let fresh = Context {
             rules: Signals::all(),
             signalled: PerSuit::default(),
             led: PerSuit::default(),
         };
-        super::lead(opening(lead, hand), signal, &fresh).is_ok()
+        Ok(super::lead(opening(lead, hand)?, signal, &fresh).is_ok())
     }
 
     /// Without signals every signal is refused as muto, and with all of them
     /// every signal is allowed.
     #[test]
-    fn none_refuses_every_signal_and_all_allows_every_one() {
+    fn none_refuses_every_signal_and_all_allows_every_one() -> anyhow::Result<()> {
         for signal in Signal::ALL {
-            assert_eq!(
-                AllowedSignal::new(signal, Signals::none()).map(|_| ()),
-                Err(Error::CannotSignal {
-                    signal,
-                    reason: SignalRefusal::Muto
-                })
+            ensure!(
+                AllowedSignal::new(signal, Signals::none()).map(|_| ())
+                    == Err(Error::CannotSignal {
+                        signal,
+                        reason: SignalRefusal::Muto
+                    })
             );
-            assert!(AllowedSignal::new(signal, Signals::all()).is_ok());
+            ensure!(AllowedSignal::new(signal, Signals::all()).is_ok());
         }
+        Ok(())
     }
 
     proptest! {
@@ -399,7 +399,7 @@ mod tests {
         ) {
             let lead = *pick.get(&hand);
             let expected = same_suit(&hand, lead).is_empty();
-            prop_assert_eq!(matches(lead, &hand, Signal::Volo), expected);
+            prop_assert_eq!(matches(lead, &hand, Signal::Volo)?, expected);
         }
 
         /// Altra is true exactly when the leader holds one other card of the
@@ -412,8 +412,8 @@ mod tests {
             let lead = *pick.get(&hand);
             let same_suit = same_suit(&hand, lead);
             let ace = TressetteCard::new(ItalianRank::Ace, lead.suit());
-            let expected = same_suit.len() == 1 && same_suit[0] < ace;
-            prop_assert_eq!(matches(lead, &hand, Signal::Altra), expected);
+            let expected = matches!(same_suit.as_slice(), [other] if *other < ace);
+            prop_assert_eq!(matches(lead, &hand, Signal::Altra)?, expected);
         }
 
         /// Striscio is true exactly when the leader holds two or more other
@@ -427,14 +427,14 @@ mod tests {
             let ace = TressetteCard::new(ItalianRank::Ace, lead.suit());
             let same_suit = same_suit(&hand, lead);
             let expected = same_suit.len() >= 2 && same_suit.iter().all(|card| *card < ace);
-            prop_assert_eq!(matches(lead, &hand, Signal::Striscio), expected);
+            prop_assert_eq!(matches(lead, &hand, Signal::Striscio)?, expected);
         }
 
         /// Busso asks for the partner's best card, so any lead may give it.
         #[test]
         fn busso_is_always_true(hand in hand_strategy(), pick in any::<Index>()) {
             let lead = *pick.get(&hand);
-            prop_assert!(matches(lead, &hand, Signal::Busso));
+            prop_assert!(matches(lead, &hand, Signal::Busso)?);
         }
 
         /// Ribusso is true exactly when the leader keeps the Two of the suit led
@@ -452,7 +452,7 @@ mod tests {
                 && hand.contains(&two)
                 && !hand.contains(&three)
                 && !hand.contains(&ace);
-            prop_assert_eq!(matches(lead, &hand, Signal::Ribusso), expected);
+            prop_assert_eq!(matches(lead, &hand, Signal::Ribusso)?, expected);
         }
 
         /// A signal is allowed exactly when the rules list it; refused, it
@@ -489,8 +489,8 @@ mod tests {
             } else {
                 Ok(())
             };
-            let allowed = AllowedSignal::new(signal, Signals::all()).expect("every signal is allowed");
-            let given = opening(lead, &hand).signal(allowed, signalled);
+            let allowed = AllowedSignal::new(signal, Signals::all())?;
+            let given = opening(lead, &hand)?.signal(allowed, signalled);
             prop_assert_eq!(given.map(|_| ()), expected);
         }
 
@@ -509,10 +509,9 @@ mod tests {
             } else {
                 Ok(())
             };
-            let allowed = AllowedSignal::new(signal, Signals::all()).expect("every signal is allowed");
-            let unrepeated = opening(lead, &hand)
-                .signal(allowed, PerSuit::default())
-                .expect("nothing was signalled yet");
+            let allowed = AllowedSignal::new(signal, Signals::all())?;
+            let unrepeated = opening(lead, &hand)?
+                .signal(allowed, PerSuit::default())?;
             prop_assert_eq!(unrepeated.timely(led).map(|_| ()), expected);
         }
     }

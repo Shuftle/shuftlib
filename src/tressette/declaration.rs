@@ -486,8 +486,8 @@ mod tests {
 
     /// Returns `declaration` proposed on the first trick, which every window
     /// allows.
-    fn in_window(declaration: Declaration) -> InWindow {
-        InWindow::new(declaration, Declarations::default(), 1).expect("the window is open")
+    fn in_window(declaration: Declaration) -> Result<InWindow, Error> {
+        InWindow::new(declaration, Declarations::default(), 1)
     }
 
     /// Returns the cards `declaration` is made of.
@@ -660,7 +660,8 @@ mod tests {
                 .iter()
                 .map(|&rank| TressetteCard::new(rank.into(), suit))
                 .collect();
-            prop_assert_eq!(declarable, by_strength[..DeclarableRank::ALL.len()].to_vec());
+            let strongest: Vec<_> = by_strength.into_iter().take(DeclarableRank::ALL.len()).collect();
+            prop_assert_eq!(declarable, strongest);
         }
 
         /// The points depend only on the kind of declaration.
@@ -690,7 +691,7 @@ mod tests {
             } else {
                 Err(Error::CannotDeclare { declaration, reason: DeclarationRefusal::NotHeld })
             };
-            prop_assert_eq!(in_window(declaration).held(&hand).map(|_| ()), expected);
+            prop_assert_eq!(in_window(declaration)?.held(&hand).map(|_| ()), expected);
         }
 
         /// A held declaration goes on exactly when neither it nor an accuso of
@@ -712,7 +713,7 @@ mod tests {
                 Ok(())
             };
             let declared: Vec<_> = declared.into_iter().map(Declared).collect();
-            let held = in_window(declaration).held(&hand).expect("the hand holds its cards");
+            let held = in_window(declaration)?.held(&hand)?;
             prop_assert_eq!(held.unmade(&declared).map(|_| ()), expected);
         }
 
@@ -733,10 +734,9 @@ mod tests {
             } else {
                 Ok(())
             };
-            let unmade = in_window(declaration)
+            let unmade = in_window(declaration)?
                 .held(&hand)
-                .and_then(|held| held.unmade(&[]))
-                .expect("the hand holds its cards, and nothing was declared");
+                .and_then(|held| held.unmade(&[]))?;
             prop_assert_eq!(unmade.declare().map(|_| ()), expected);
         }
 

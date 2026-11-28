@@ -210,8 +210,10 @@ impl<S: Eq> Waiting<S> {
     /// ```
     /// use shuftlib::engine::Waiting;
     ///
-    /// assert_eq!(Waiting::new([2, 1, 2]).unwrap().as_slice(), [2, 1]);
+    /// let waiting = Waiting::new([2, 1, 2]).ok_or("nobody to wait on")?;
+    /// assert_eq!(waiting.as_slice(), [2, 1]);
     /// assert_eq!(Waiting::<u8>::new([]), None);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn new(seats: impl IntoIterator<Item = S>) -> Option<Self> {
         let mut unique = Vec::new();
@@ -874,9 +876,11 @@ impl<G: Game> Session<G> {
 
 #[cfg(test)]
 mod tests {
-    use std::{assert_matches, ops::Range};
+    use std::ops::Range;
 
-    use proptest::{collection::vec, option, prelude::*};
+    use anyhow::{Context, ensure};
+
+    use proptest::{collection::vec, option, prelude::*, test_runner::TestCaseError};
     use rand::{RngExt, SeedableRng, rngs::StdRng, seq::IndexedRandom};
 
     use super::*;
@@ -1091,219 +1095,214 @@ mod tests {
         }
     }
 
-    fn play_out(seed: u64) -> Session<Guessing> {
+    fn play_out(seed: u64) -> anyhow::Result<Session<Guessing>> {
         let mut session = Session::<Guessing>::new(10);
-        session
-            .resolve_chance(&mut StdRng::seed_from_u64(seed))
-            .unwrap();
+        session.resolve_chance(&mut StdRng::seed_from_u64(seed))?;
         let mut guess = 0;
         while let Status::ToAct(seats) = session.status() {
-            session
-                .act(seats.as_slice()[0], Action::Guess(guess))
-                .unwrap();
+            let seat = *seats.as_slice().first().context("a seat is to act")?;
+            session.act(seat, Action::Guess(guess))?;
             guess += 1;
         }
-        session
+        Ok(session)
     }
 
-    fn started(secret: u8) -> Session<Guessing> {
+    fn started(secret: u8) -> anyhow::Result<Session<Guessing>> {
         let mut session = Session::<Guessing>::new(10);
-        session.resolve_chance_with(secret).unwrap();
-        session
+        session.resolve_chance_with(secret)?;
+        Ok(session)
     }
 
     #[test]
-    fn acting_before_chance_is_rejected() {
+    fn acting_before_chance_is_rejected() -> anyhow::Result<()> {
         let mut session = Session::<Guessing>::new(10);
-        assert_eq!(
-            session.act(Seat::First, Action::Guess(0)),
-            Err(ActError::AwaitingChance)
-        );
-        assert!(session.log().is_empty());
+        ensure!(session.act(Seat::First, Action::Guess(0)) == Err(ActError::AwaitingChance));
+        ensure!(session.log().is_empty());
+        Ok(())
     }
 
     #[test]
-    fn acting_out_of_turn_is_rejected() {
-        let mut session = started(5);
-        session.act(Seat::First, Action::Guess(0)).unwrap();
+    fn acting_out_of_turn_is_rejected() -> anyhow::Result<()> {
+        let mut session = started(5)?;
+        session.act(Seat::First, Action::Guess(0))?;
         let before = session.clone();
-        assert_eq!(
-            session.act(Seat::First, Action::Guess(1)),
-            Err(ActError::NotYourTurn { seat: Seat::First })
+        ensure!(
+            session.act(Seat::First, Action::Guess(1))
+                == Err(ActError::NotYourTurn { seat: Seat::First })
         );
-        assert_eq!(session, before);
+        ensure!(session == before);
+        Ok(())
     }
 
     #[test]
-    fn illegal_actions_are_rejected_without_changing_the_game() {
-        let mut session = started(5);
+    fn illegal_actions_are_rejected_without_changing_the_game() -> anyhow::Result<()> {
+        let mut session = started(5)?;
         let before = session.clone();
-        assert_eq!(
-            session.act(Seat::First, Action::Guess(10)),
-            Err(ActError::Illegal(Error::OutOfRange))
+        ensure!(
+            session.act(Seat::First, Action::Guess(10))
+                == Err(ActError::Illegal(Error::OutOfRange))
         );
-        assert_eq!(session, before);
+        ensure!(session == before);
+        Ok(())
     }
 
     #[test]
-    fn chance_outcomes_can_be_forced_and_are_checked() {
+    fn chance_outcomes_can_be_forced_and_are_checked() -> anyhow::Result<()> {
         let mut session = Session::<Guessing>::new(10);
         let before = session.clone();
-        assert_eq!(
-            session.resolve_chance_with(10),
-            Err(ChanceError::Illegal(Error::OutOfRange))
-        );
-        assert_eq!(session, before);
+        ensure!(session.resolve_chance_with(10) == Err(ChanceError::Illegal(Error::OutOfRange)));
+        ensure!(session == before);
 
-        let update = session.resolve_chance_with(4).unwrap();
-        assert_eq!(update.notice(), &Notice::Chance);
-        assert_eq!(
-            update.for_seat(Seat::First).collect::<Vec<_>>(),
-            [&Event::SecretIsEven(true)]
+        let update = session.resolve_chance_with(4)?;
+        ensure!(update.notice() == &Notice::Chance);
+        ensure!(update.for_seat(Seat::First).collect::<Vec<_>>() == [&Event::SecretIsEven(true)]);
+        ensure!(session.log() == [Step::Chance(4)]);
+        ensure!(session.resolve_chance_with(4) == Err(ChanceError::NotAwaitingChance));
+        ensure!(
+            session.resolve_chance(&mut StdRng::seed_from_u64(1))
+                == Err(ChanceError::NotAwaitingChance)
         );
-        assert_eq!(session.log(), [Step::Chance(4)]);
-        assert_eq!(
-            session.resolve_chance_with(4),
-            Err(ChanceError::NotAwaitingChance)
-        );
-        assert_eq!(
-            session.resolve_chance(&mut StdRng::seed_from_u64(1)),
-            Err(ChanceError::NotAwaitingChance)
-        );
+        Ok(())
     }
 
     #[test]
-    fn finished_games_reject_actions() {
-        let mut session = play_out(7);
-        assert_matches!(session.status(), Status::Over(_));
-        assert_eq!(
-            session.act(Seat::First, Action::Guess(0)),
-            Err(ActError::GameOver)
-        );
+    fn finished_games_reject_actions() -> anyhow::Result<()> {
+        let mut session = play_out(7)?;
+        ensure!(matches!(session.status(), Status::Over(_)));
+        ensure!(session.act(Seat::First, Action::Guess(0)) == Err(ActError::GameOver));
+        Ok(())
     }
 
     #[test]
-    fn any_seat_may_forfeit_until_the_game_is_over() {
+    fn any_seat_may_forfeit_until_the_game_is_over() -> anyhow::Result<()> {
         // Even before the game waits on anyone.
         let mut session = Session::<Guessing>::new(10);
-        session.forfeit(Seat::Second).unwrap();
-        assert_eq!(session.status(), Status::Over(Seat::First));
+        session.forfeit(Seat::Second)?;
+        ensure!(session.status() == Status::Over(Seat::First));
 
         // Even a seat the game isn't waiting on.
-        let mut session = started(5);
-        let update = session.forfeit(Seat::Second).unwrap();
-        assert_eq!(update.notice(), &Notice::Forfeit { seat: Seat::Second });
-        assert_eq!(
-            update.public_only().collect::<Vec<_>>(),
-            [&Event::Lost { seat: Seat::Second }]
-        );
-        assert_eq!(session.status(), Status::Over(Seat::First));
-        assert_eq!(
-            session.log(),
-            [Step::Chance(5), Step::Forfeit { seat: Seat::Second }]
-        );
+        let mut session = started(5)?;
+        let update = session.forfeit(Seat::Second)?;
+        ensure!(update.notice() == &Notice::Forfeit { seat: Seat::Second });
+        ensure!(update.public_only().collect::<Vec<_>>() == [&Event::Lost { seat: Seat::Second }]);
+        ensure!(session.status() == Status::Over(Seat::First));
+        ensure!(session.log() == [Step::Chance(5), Step::Forfeit { seat: Seat::Second }]);
 
         let before = session.clone();
-        assert_eq!(session.forfeit(Seat::First), Err(ForfeitError::GameOver));
-        assert_eq!(session, before);
+        ensure!(session.forfeit(Seat::First) == Err(ForfeitError::GameOver));
+        ensure!(session == before);
+        Ok(())
     }
 
     #[test]
-    fn a_seat_forfeits_only_once() {
+    fn a_seat_forfeits_only_once() -> anyhow::Result<()> {
         // In this game, a forfeit doesn't end it.
         let mut session = Session::<Faulty>::new(1);
-        session.forfeit(Seat::Second).unwrap();
+        session.forfeit(Seat::Second)?;
         let before = session.clone();
-        assert_eq!(
-            session.forfeit(Seat::Second),
-            Err(ForfeitError::AlreadyForfeited { seat: Seat::Second })
+        ensure!(
+            session.forfeit(Seat::Second)
+                == Err(ForfeitError::AlreadyForfeited { seat: Seat::Second })
         );
-        assert_eq!(session, before);
-        session.forfeit(Seat::First).unwrap();
-        assert_eq!(session.forfeited(), [Seat::Second, Seat::First]);
+        ensure!(session == before);
+        session.forfeit(Seat::First)?;
+        ensure!(session.forfeited() == [Seat::Second, Seat::First]);
+        Ok(())
     }
 
     #[test]
-    fn a_seat_that_forfeited_may_not_act() {
+    fn a_seat_that_forfeited_may_not_act() -> anyhow::Result<()> {
         // In this game, a forfeit doesn't end it, and the first seat still
         // gets its turn.
         let mut session = Session::<Faulty>::new(1);
-        session.forfeit(Seat::First).unwrap();
-        session.resolve_chance_with(0).unwrap();
-        assert_eq!(session.status().to_act(), [Seat::First]);
+        session.forfeit(Seat::First)?;
+        session.resolve_chance_with(0)?;
+        ensure!(session.status().to_act() == [Seat::First]);
         let before = session.clone();
-        assert_eq!(
-            session.act(Seat::First, Action::Guess(0)),
-            Err(ActError::Forfeited { seat: Seat::First })
+        ensure!(
+            session.act(Seat::First, Action::Guess(0))
+                == Err(ActError::Forfeited { seat: Seat::First })
         );
-        assert_eq!(session, before);
+        ensure!(session == before);
+        Ok(())
     }
 
     #[test]
-    fn only_the_seats_of_the_game_may_forfeit() {
+    fn only_the_seats_of_the_game_may_forfeit() -> anyhow::Result<()> {
         let mut session = Session::<Faulty>::new(0);
         let before = session.clone();
-        assert_eq!(
-            session.forfeit(Seat::First),
-            Err(ForfeitError::NotSeated { seat: Seat::First })
-        );
-        assert_eq!(session, before);
+        ensure!(session.forfeit(Seat::First) == Err(ForfeitError::NotSeated { seat: Seat::First }));
+        ensure!(session == before);
+        Ok(())
     }
 
     #[test]
-    fn games_that_sample_nothing_while_awaiting_chance_are_reported() {
+    fn games_that_sample_nothing_while_awaiting_chance_are_reported() -> anyhow::Result<()> {
         let mut session = Session::<Faulty>::new(0);
-        assert_eq!(session.status(), Status::Chance);
-        assert_eq!(
-            session.resolve_chance(&mut StdRng::seed_from_u64(1)),
-            Err(ChanceError::NothingSampled)
+        ensure!(session.status() == Status::Chance);
+        ensure!(
+            session.resolve_chance(&mut StdRng::seed_from_u64(1))
+                == Err(ChanceError::NothingSampled)
         );
-        assert!(session.log().is_empty());
+        ensure!(session.log().is_empty());
+        Ok(())
     }
 
     #[test]
-    fn every_update_carries_its_step_and_a_public_notice() {
+    fn every_update_carries_its_step_and_a_public_notice() -> anyhow::Result<()> {
         let mut session = Session::<Guessing>::new(10);
         let updates = [
-            session.resolve_chance_with(3).unwrap(),
-            session.act(Seat::First, Action::Guess(0)).unwrap(),
-            session.forfeit(Seat::Second).unwrap(),
+            session.resolve_chance_with(3)?,
+            session.act(Seat::First, Action::Guess(0))?,
+            session.forfeit(Seat::Second)?,
         ];
-        assert_eq!(updates.each_ref().map(Update::step), [0, 1, 2]);
-        assert_eq!(
-            updates.each_ref().map(|update| *update.notice()),
-            [
-                Notice::Chance,
-                Notice::Acted { seat: Seat::First },
-                Notice::Forfeit { seat: Seat::Second },
-            ]
+        ensure!(updates.each_ref().map(Update::step) == [0, 1, 2]);
+        ensure!(
+            updates.each_ref().map(|update| *update.notice())
+                == [
+                    Notice::Chance,
+                    Notice::Acted { seat: Seat::First },
+                    Notice::Forfeit { seat: Seat::Second },
+                ]
         );
-        assert_eq!(session.steps(), 3);
+        ensure!(session.steps() == 3);
         // The second seat receives nothing from the chance step but its
         // notice.
-        assert_eq!(updates[0].for_seat(Seat::Second).count(), 0);
+        let [chance, ..] = &updates;
+        ensure!(chance.for_seat(Seat::Second).count() == 0);
+        Ok(())
     }
 
     /// Plays a game of [`Guessing`] for numbers `below`, with random guesses
     /// and the odd forfeit drawn from `seed`, until it's over. Returns it
     /// with every update it produced.
-    fn random_game(below: u8, seed: u64) -> (Session<Guessing>, Vec<UpdateOf<Guessing>>) {
+    fn random_game(
+        below: u8,
+        seed: u64,
+    ) -> Result<(Session<Guessing>, Vec<UpdateOf<Guessing>>), TestCaseError> {
         let mut rng = StdRng::seed_from_u64(seed);
         let mut session = Session::<Guessing>::new(below);
         let mut sent = Vec::new();
         loop {
             let update = match session.status() {
-                Status::Chance => session.resolve_chance(&mut rng).unwrap(),
+                Status::Chance => session.resolve_chance(&mut rng)?,
                 Status::ToAct(seats) => {
                     if rng.random_ratio(1, 20) {
-                        let seat = *session.seats().choose(&mut rng).unwrap();
-                        session.forfeit(seat).unwrap()
+                        let seat = *session
+                            .seats()
+                            .choose(&mut rng)
+                            .ok_or_else(|| TestCaseError::fail("the game has seats"))?;
+                        session.forfeit(seat)?
                     } else {
                         let guess = Action::Guess(rng.random_range(0..below));
-                        session.act(seats[0], guess).unwrap()
+                        let seat = *seats
+                            .as_slice()
+                            .first()
+                            .ok_or_else(|| TestCaseError::fail("a seat is to act"))?;
+                        session.act(seat, guess)?
                     }
                 }
-                Status::Over(_) => return (session, sent),
+                Status::Over(_) => return Ok((session, sent)),
             };
             sent.push(update);
         }
@@ -1320,8 +1319,8 @@ mod tests {
     proptest! {
         #[test]
         fn replay_reproduces_the_game_from_its_log_alone(below in 1u8..20, seed: u64) {
-            let (session, _) = random_game(below, seed);
-            let replay = Session::<Guessing>::replay(below, session.log().to_vec()).unwrap();
+            let (session, _) = random_game(below, seed)?;
+            let replay = Session::<Guessing>::replay(below, session.log().to_vec())?;
             prop_assert_eq!(replay, session);
         }
 
@@ -1334,7 +1333,7 @@ mod tests {
             viewer in viewer(),
             since in 0usize..40,
         ) {
-            let (session, sent) = random_game(below, seed);
+            let (session, sent) = random_game(below, seed)?;
             // From the start, the whole history; from `since`, the rest.
             for since in [0, since] {
                 let expected: Vec<_> = sent
@@ -1342,7 +1341,7 @@ mod tests {
                     .skip(since)
                     .map(|update| update.visible_to(viewer))
                     .collect();
-                prop_assert_eq!(session.updates_for(viewer, since).unwrap(), expected);
+                prop_assert_eq!(session.updates_for(viewer, since)?, expected);
             }
         }
 
@@ -1400,36 +1399,36 @@ mod tests {
     }
 
     #[test]
-    fn replay_reports_the_failing_step() {
-        assert_eq!(
-            Session::<Guessing>::replay(10, [Step::Chance(1), Step::Chance(2)]).unwrap_err(),
-            ReplayError::Chance {
-                step: 1,
-                error: ChanceError::NotAwaitingChance,
-            }
+    fn replay_reports_the_failing_step() -> anyhow::Result<()> {
+        ensure!(
+            Session::<Guessing>::replay(10, [Step::Chance(1), Step::Chance(2)])
+                == Err(ReplayError::Chance {
+                    step: 1,
+                    error: ChanceError::NotAwaitingChance,
+                })
         );
-        assert_eq!(
+        ensure!(
             Session::<Guessing>::replay(
                 10,
                 [
                     Step::Forfeit { seat: Seat::First },
                     Step::Forfeit { seat: Seat::Second },
                 ]
-            )
-            .unwrap_err(),
-            ReplayError::Forfeit {
+            ) == Err(ReplayError::Forfeit {
                 step: 1,
                 error: ForfeitError::GameOver,
-            }
+            })
         );
+        Ok(())
     }
 
     #[test]
-    fn debug_output_hides_the_game_and_the_log() {
-        let session = started(5);
-        assert_eq!(
-            format!("{session:?}"),
-            "Session { config: 10, status: ToAct([First]), steps: 1, .. }"
+    fn debug_output_hides_the_game_and_the_log() -> anyhow::Result<()> {
+        let session = started(5)?;
+        ensure!(
+            format!("{session:?}")
+                == "Session { config: 10, status: ToAct([First]), steps: 1, .. }"
         );
+        Ok(())
     }
 }

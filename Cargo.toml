@@ -23,6 +23,7 @@ thiserror = "2.0"
 default = []
 
 [dev-dependencies]
+anyhow = "1.0"
 proptest="1.12"
 
 [profile.test.package.proptest]
@@ -46,3 +47,4 @@ missing_errors_doc = "warn"
 todo = "warn"
 cast_lossless = "warn"
 cognitive_complexity = "warn"
+indexing_slicing = "warn"
