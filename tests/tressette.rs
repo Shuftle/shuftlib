@@ -15,18 +15,20 @@ fn a_deal_made_with_real_cards_can_be_entered() {
             .map(|rank| TressetteCard::new(rank, suit))
             .collect::<Vec<_>>()
     };
+    let deal = Deal::new(
+        Seat::East,
+        PerSeat {
+            north: suit(Suit::Coins),
+            east: suit(Suit::Cups),
+            south: suit(Suit::Swords),
+            west: suit(Suit::Clubs),
+        },
+    )
+    .expect("the deal is complete");
     let mut session = Session::<Tressette>::new(Config::default());
     session
-        .resolve_chance_with(Deal {
-            dealer: Seat::East,
-            hands: PerSeat {
-                north: suit(Suit::Coins),
-                east: suit(Suit::Cups),
-                south: suit(Suit::Swords),
-                west: suit(Suit::Clubs),
-            },
-        })
-        .expect("the deal is complete");
+        .resolve_chance_with(deal)
+        .expect("East deals the first hand");
     assert_eq!(session.observe(Seat::South).hand(), suit(Suit::Swords));
     assert_eq!(session.status().to_act(), [Seat::North]);
     assert!(session.spectate().hand().is_empty());

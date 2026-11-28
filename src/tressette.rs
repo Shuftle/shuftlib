@@ -149,13 +149,46 @@ impl Phase {
 /// to the next seat, so only the first deal may have any `dealer`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Deal {
-    /// The seat dealing.
-    pub dealer: Seat,
-    /// The cards each seat is dealt: ten each, the whole deck between them.
-    pub hands: PerSeat<Vec<TressetteCard>>,
+    dealer: Seat,
+    hands: PerSeat<Vec<TressetteCard>>,
 }
 
+/// Why hands can't make a [`Deal`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("the deal must give ten cards to each seat, the whole deck between them")]
+pub struct IncompleteDeal;
+
 impl Deal {
+    /// Returns the deal of `hands` by `dealer`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IncompleteDeal`] unless the hands hold ten cards each, the
+    /// whole deck between them.
+    pub fn new(dealer: Seat, hands: PerSeat<Vec<TressetteCard>>) -> Result<Self, IncompleteDeal> {
+        let distinct: HashSet<TressetteCard> = Seat::ALL
+            .iter()
+            .flat_map(|&seat| hands[seat].iter().copied())
+            .collect();
+        let complete = distinct.len() == Seat::ALL.len() * HAND_SIZE
+            && Seat::ALL.iter().all(|&seat| hands[seat].len() == HAND_SIZE);
+        if complete {
+            Ok(Self { dealer, hands })
+        } else {
+            Err(IncompleteDeal)
+        }
+    }
+
+    /// Returns the seat dealing.
+    pub fn dealer(&self) -> Seat {
+        self.dealer
+    }
+
+    /// Returns the cards each seat is dealt.
+    pub fn hands(&self) -> &PerSeat<Vec<TressetteCard>> {
+        &self.hands
+    }
+
     /// Shuffles the deck with `rng` and deals it from `dealer`, five cards at
     /// a time starting from the seat after them.
     pub fn shuffled(dealer: Seat, rng: &mut impl Rng) -> Self {
@@ -174,19 +207,6 @@ impl Deal {
             drawn += 1;
         }
         Self { dealer, hands }
-    }
-
-    /// Returns whether the hands hold ten cards each, the whole deck between
-    /// them.
-    fn is_complete(&self) -> bool {
-        let distinct: HashSet<TressetteCard> = Seat::ALL
-            .iter()
-            .flat_map(|&seat| self.hands[seat].iter().copied())
-            .collect();
-        distinct.len() == Seat::ALL.len() * HAND_SIZE
-            && Seat::ALL
-                .iter()
-                .all(|&seat| self.hands[seat].len() == HAND_SIZE)
     }
 }
 
@@ -360,10 +380,6 @@ pub enum Error {
         /// The seat whose turn it is to deal.
         expected: Seat,
     },
-    /// The deal doesn't give ten cards to each seat, the whole deck between
-    /// them.
-    #[error("the deal must give ten cards to each seat, the whole deck between them")]
-    IncompleteDeal,
     /// The card isn't in the acting seat's hand.
     #[error("{card} is not in the hand")]
     CardNotInHand {
@@ -683,9 +699,6 @@ impl Game for Tressette {
             .filter(|&expected| expected != deal.dealer)
         {
             return Err(Error::WrongDealer { expected });
-        }
-        if !deal.is_complete() {
-            return Err(Error::IncompleteDeal);
         }
 
         let Deal { dealer, hands } = deal;
@@ -1038,8 +1051,8 @@ mod tests {
             }
         }
 
-        /// A deal with a card moved to another hand, dropped, or replaced by
-        /// a copy of another is rejected, and the game is left unchanged.
+        /// Hands with a card moved to another hand, dropped, or replaced by a
+        /// copy of another make no deal.
         #[test]
         fn incomplete_deals_are_rejected(
             seed: u64,
@@ -1049,28 +1062,23 @@ mod tests {
             other in 0usize..HAND_SIZE,
             mistake in 0u8..3,
         ) {
-            let mut deal = Deal::shuffled(Seat::North, &mut StdRng::seed_from_u64(seed));
+            let deal = Deal::shuffled(Seat::North, &mut StdRng::seed_from_u64(seed));
+            let mut hands = deal.hands().clone();
             match mistake {
                 0 => {
                     prop_assume!(from != to);
-                    let moved = deal.hands[from].remove(card);
-                    deal.hands[to].push(moved);
+                    let moved = hands[from].remove(card);
+                    hands[to].push(moved);
                 }
                 1 => {
-                    deal.hands[from].remove(card);
+                    hands[from].remove(card);
                 }
                 _ => {
                     prop_assume!(from != to || card != other);
-                    deal.hands[from][card] = deal.hands[to][other];
+                    hands[from][card] = hands[to][other];
                 }
             }
-            let mut session = Session::<Tressette>::new(Config::default());
-            let before = session.clone();
-            prop_assert_eq!(
-                session.resolve_chance_with(deal),
-                Err(ChanceError::Illegal(Error::IncompleteDeal))
-            );
-            prop_assert_eq!(session, before);
+            prop_assert_eq!(Deal::new(deal.dealer(), hands), Err(IncompleteDeal));
         }
     }
 
