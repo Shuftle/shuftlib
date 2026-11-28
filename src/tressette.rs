@@ -83,7 +83,7 @@ mod table;
 mod trick;
 
 pub use card::TressetteCard;
-use declaration::{Declaration, DeclarationRefusal, Declared};
+use declaration::{Declaration, DeclarationRefusal, DeclarationSeen, Declared};
 use signal::{Signal, SignalRefusal};
 pub use table::{PerSeat, PerTeam, Seat, Team};
 use trick::Held;
@@ -315,10 +315,8 @@ pub enum Event {
     Declared {
         /// The seat that declared.
         seat: Seat,
-        /// The points the declaration is worth.
-        points: u8,
-        /// The declaration, or `None` when the rules keep it hidden.
-        declaration: Option<Declaration>,
+        /// The declaration, as the rules let everyone see it.
+        declaration: DeclarationSeen,
     },
     /// A trick was completed. Its taker leads the next one.
     TrickTaken {
@@ -618,9 +616,12 @@ impl Game for Tressette {
                 let mut events = Events::new();
                 events.public(Event::Declared {
                     seat,
-                    points: declaration.points(),
-                    declaration: (rules.visibility == declaration::Visibility::Exact)
-                        .then_some(declaration),
+                    declaration: match rules.visibility {
+                        declaration::Visibility::Exact => DeclarationSeen::Exact(declaration),
+                        declaration::Visibility::Anonymous => DeclarationSeen::Hidden {
+                            points: declaration.points(),
+                        },
+                    },
                 });
                 return Ok(events);
             }
@@ -1433,13 +1434,17 @@ mod tests {
         declaration: Declaration,
         update: &UpdateOf<Tressette>,
     ) {
-        let shown = config.declarations.visibility == Visibility::Exact;
+        let seen = match config.declarations.visibility {
+            Visibility::Exact => DeclarationSeen::Exact(declaration),
+            Visibility::Anonymous => DeclarationSeen::Hidden {
+                points: declaration.points(),
+            },
+        };
         assert_eq!(
             update.public_only().collect::<Vec<_>>(),
             [&Event::Declared {
                 seat,
-                points: declaration.points(),
-                declaration: shown.then_some(declaration),
+                declaration: seen,
             }]
         );
         assert_eq!(to_act(session), Some(seat));
@@ -1541,7 +1546,9 @@ mod tests {
                         signalled = PerSeat::default();
                         led = PerSuit::default();
                     }
-                    Event::Declared { seat, points, .. } => declared[seat.team()] += points,
+                    Event::Declared { seat, declaration } => {
+                        declared[seat.team()] += declaration.points();
+                    }
                     Event::HandScored { points, .. } => assert_hand_points(*points, declared),
                     _ => {}
                 }

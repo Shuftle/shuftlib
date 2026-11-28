@@ -234,6 +234,28 @@ impl Unmade<'_> {
     }
 }
 
+/// What everyone sees of a declaration a seat made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DeclarationSeen {
+    /// The declaration itself.
+    Exact(Declaration),
+    /// Only its points, as the rules keep the declaration hidden.
+    Hidden {
+        /// The points the declaration is worth.
+        points: u8,
+    },
+}
+
+impl DeclarationSeen {
+    /// Returns the points the declaration is worth.
+    pub fn points(&self) -> u8 {
+        match self {
+            Self::Exact(declaration) => declaration.points(),
+            Self::Hidden { points } => *points,
+        }
+    }
+}
+
 /// A declaration a seat made, as the rules allowed it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Declared(Declaration);
