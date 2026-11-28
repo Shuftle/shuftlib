@@ -111,8 +111,8 @@ pub trait Game: Sized {
     /// # Errors
     ///
     /// Returns an error if `outcome` isn't a possible outcome of this chance
-    /// step, e.g. a deal that doesn't use the whole deck. The game must be
-    /// left unchanged in that case.
+    /// step, e.g. a deal by a seat whose turn it isn't to deal. The game must
+    /// be left unchanged in that case.
     fn apply_chance(
         &mut self,
         outcome: Self::Chance,

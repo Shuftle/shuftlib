@@ -83,7 +83,7 @@ mod table;
 mod trick;
 
 pub use card::TressetteCard;
-use declaration::{Declaration, DeclarationRefusal, Declared};
+use declaration::{Declaration, DeclarationRefusal, DeclarationSeen, Declared};
 use signal::{Signal, SignalRefusal};
 pub use table::{PerSeat, PerTeam, Seat, Team};
 use trick::Held;
@@ -149,13 +149,46 @@ impl Phase {
 /// to the next seat, so only the first deal may have any `dealer`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Deal {
-    /// The seat dealing.
-    pub dealer: Seat,
-    /// The cards each seat is dealt: ten each, the whole deck between them.
-    pub hands: PerSeat<Vec<TressetteCard>>,
+    dealer: Seat,
+    hands: PerSeat<Vec<TressetteCard>>,
 }
 
+/// Why hands can't make a [`Deal`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("the deal must give ten cards to each seat, the whole deck between them")]
+pub struct IncompleteDeal;
+
 impl Deal {
+    /// Returns the deal of `hands` by `dealer`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IncompleteDeal`] unless the hands hold ten cards each, the
+    /// whole deck between them.
+    pub fn new(dealer: Seat, hands: PerSeat<Vec<TressetteCard>>) -> Result<Self, IncompleteDeal> {
+        let distinct: HashSet<TressetteCard> = Seat::ALL
+            .iter()
+            .flat_map(|&seat| hands[seat].iter().copied())
+            .collect();
+        let complete = distinct.len() == Seat::ALL.len() * HAND_SIZE
+            && Seat::ALL.iter().all(|&seat| hands[seat].len() == HAND_SIZE);
+        if complete {
+            Ok(Self { dealer, hands })
+        } else {
+            Err(IncompleteDeal)
+        }
+    }
+
+    /// Returns the seat dealing.
+    pub fn dealer(&self) -> Seat {
+        self.dealer
+    }
+
+    /// Returns the cards each seat is dealt.
+    pub fn hands(&self) -> &PerSeat<Vec<TressetteCard>> {
+        &self.hands
+    }
+
     /// Shuffles the deck with `rng` and deals it from `dealer`, five cards at
     /// a time starting from the seat after them.
     pub fn shuffled(dealer: Seat, rng: &mut impl Rng) -> Self {
@@ -174,19 +207,6 @@ impl Deal {
             drawn += 1;
         }
         Self { dealer, hands }
-    }
-
-    /// Returns whether the hands hold ten cards each, the whole deck between
-    /// them.
-    fn is_complete(&self) -> bool {
-        let distinct: HashSet<TressetteCard> = Seat::ALL
-            .iter()
-            .flat_map(|&seat| self.hands[seat].iter().copied())
-            .collect();
-        distinct.len() == Seat::ALL.len() * HAND_SIZE
-            && Seat::ALL
-                .iter()
-                .all(|&seat| self.hands[seat].len() == HAND_SIZE)
     }
 }
 
@@ -315,10 +335,8 @@ pub enum Event {
     Declared {
         /// The seat that declared.
         seat: Seat,
-        /// The points the declaration is worth.
-        points: u8,
-        /// The declaration, or `None` when the rules keep it hidden.
-        declaration: Option<Declaration>,
+        /// The declaration, as the rules let everyone see it.
+        declaration: DeclarationSeen,
     },
     /// A trick was completed. Its taker leads the next one.
     TrickTaken {
@@ -362,10 +380,6 @@ pub enum Error {
         /// The seat whose turn it is to deal.
         expected: Seat,
     },
-    /// The deal doesn't give ten cards to each seat, the whole deck between
-    /// them.
-    #[error("the deal must give ten cards to each seat, the whole deck between them")]
-    IncompleteDeal,
     /// The card isn't in the acting seat's hand.
     #[error("{card} is not in the hand")]
     CardNotInHand {
@@ -426,6 +440,7 @@ pub struct View {
     tricks_taken: PerTeam<usize>,
     score: PerTeam<u8>,
     dealer: Option<Seat>,
+    declared: PerSeat<Vec<DeclarationSeen>>,
     declarable: Vec<Declaration>,
     leads: Vec<(TressetteCard, Signal)>,
 }
@@ -472,6 +487,13 @@ impl View {
     /// before the first deal.
     pub fn dealer(&self) -> Option<Seat> {
         self.dealer
+    }
+
+    /// Returns what each seat declared in this hand, in order: exactly for
+    /// the observing seat's own declarations, as the rules let everyone see
+    /// them for the others. Empty between hands.
+    pub fn declared(&self) -> &PerSeat<Vec<DeclarationSeen>> {
+        &self.declared
     }
 
     /// Returns the cards the observing seat may play. Empty when it's not
@@ -618,9 +640,7 @@ impl Game for Tressette {
                 let mut events = Events::new();
                 events.public(Event::Declared {
                     seat,
-                    points: declaration.points(),
-                    declaration: (rules.visibility == declaration::Visibility::Exact)
-                        .then_some(declaration),
+                    declaration: made.seen(rules.visibility),
                 });
                 return Ok(events);
             }
@@ -680,9 +700,6 @@ impl Game for Tressette {
         {
             return Err(Error::WrongDealer { expected });
         }
-        if !deal.is_complete() {
-            return Err(Error::IncompleteDeal);
-        }
 
         let Deal { dealer, hands } = deal;
         let mut events = Events::new();
@@ -735,6 +752,20 @@ impl Game for Tressette {
             }),
             score: self.score,
             dealer: self.dealer,
+            declared: hand.map_or_default(|hand| {
+                PerSeat::from_fn(|seat| {
+                    hand.declared[seat]
+                        .iter()
+                        .map(|&made| {
+                            if viewer.seat() == Some(seat) {
+                                DeclarationSeen::Exact(made.declaration())
+                            } else {
+                                made.seen(self.config.declarations.visibility)
+                            }
+                        })
+                        .collect()
+                })
+            }),
             declarable: to_act.map_or_default(|(hand, seat)| {
                 declaration::allowed(&hand.declaration_context(self.config.declarations, seat))
             }),
@@ -1020,8 +1051,8 @@ mod tests {
             }
         }
 
-        /// A deal with a card moved to another hand, dropped, or replaced by
-        /// a copy of another is rejected, and the game is left unchanged.
+        /// Hands with a card moved to another hand, dropped, or replaced by a
+        /// copy of another make no deal.
         #[test]
         fn incomplete_deals_are_rejected(
             seed: u64,
@@ -1031,28 +1062,23 @@ mod tests {
             other in 0usize..HAND_SIZE,
             mistake in 0u8..3,
         ) {
-            let mut deal = Deal::shuffled(Seat::North, &mut StdRng::seed_from_u64(seed));
+            let deal = Deal::shuffled(Seat::North, &mut StdRng::seed_from_u64(seed));
+            let mut hands = deal.hands().clone();
             match mistake {
                 0 => {
                     prop_assume!(from != to);
-                    let moved = deal.hands[from].remove(card);
-                    deal.hands[to].push(moved);
+                    let moved = hands[from].remove(card);
+                    hands[to].push(moved);
                 }
                 1 => {
-                    deal.hands[from].remove(card);
+                    hands[from].remove(card);
                 }
                 _ => {
                     prop_assume!(from != to || card != other);
-                    deal.hands[from][card] = deal.hands[to][other];
+                    hands[from][card] = hands[to][other];
                 }
             }
-            let mut session = Session::<Tressette>::new(Config::default());
-            let before = session.clone();
-            prop_assert_eq!(
-                session.resolve_chance_with(deal),
-                Err(ChanceError::Illegal(Error::IncompleteDeal))
-            );
-            prop_assert_eq!(session, before);
+            prop_assert_eq!(Deal::new(deal.dealer(), hands), Err(IncompleteDeal));
         }
     }
 
@@ -1214,7 +1240,8 @@ mod tests {
         }
     }
 
-    /// What one seat knows, rebuilt from nothing but the events it receives.
+    /// What one seat knows, rebuilt from nothing but the events it receives
+    /// and the declarations it made itself.
     #[derive(Debug, Default)]
     struct Tracker {
         hand: Vec<TressetteCard>,
@@ -1225,6 +1252,9 @@ mod tests {
         tricks_taken: PerTeam<usize>,
         score: PerTeam<u8>,
         dealer: Option<Seat>,
+        declared: PerSeat<Vec<DeclarationSeen>>,
+        /// The declaration this seat just made, until its event arrives.
+        made: Option<Declaration>,
     }
 
     impl Tracker {
@@ -1278,7 +1308,20 @@ mod tests {
                         ..Self::default()
                     };
                 }
-                Event::Declared { .. } | Event::GameWon { .. } => {}
+                Event::Declared {
+                    seat: player,
+                    declaration,
+                } => {
+                    let seen = if Some(*player) == viewer {
+                        DeclarationSeen::Exact(
+                            self.made.take().expect("the seat knows what it declared"),
+                        )
+                    } else {
+                        *declaration
+                    };
+                    self.declared[*player].push(seen);
+                }
+                Event::GameWon { .. } => {}
             }
         }
 
@@ -1292,6 +1335,7 @@ mod tests {
             let trick: Vec<_> = view.trick().map_or_default(|trick| trick.plays().collect());
             assert_eq!(trick, self.trick);
             assert_eq!(view.trick().and_then(Trick::signal), self.signal);
+            assert_eq!(view.declared(), &self.declared);
         }
     }
 
@@ -1433,13 +1477,17 @@ mod tests {
         declaration: Declaration,
         update: &UpdateOf<Tressette>,
     ) {
-        let shown = config.declarations.visibility == Visibility::Exact;
+        let seen = match config.declarations.visibility {
+            Visibility::Exact => DeclarationSeen::Exact(declaration),
+            Visibility::Anonymous => DeclarationSeen::Hidden {
+                points: declaration.points(),
+            },
+        };
         assert_eq!(
             update.public_only().collect::<Vec<_>>(),
             [&Event::Declared {
                 seat,
-                points: declaration.points(),
-                declaration: shown.then_some(declaration),
+                declaration: seen,
             }]
         );
         assert_eq!(to_act(session), Some(seat));
@@ -1507,6 +1555,7 @@ mod tests {
                         assert_card_event(seat, action, &update);
                         if let Action::Declare(declaration) = action {
                             assert_declared(&session, config, seat, declaration, &update);
+                            trackers[seat].made = Some(declaration);
                         }
                         update
                     }
@@ -1541,7 +1590,9 @@ mod tests {
                         signalled = PerSeat::default();
                         led = PerSuit::default();
                     }
-                    Event::Declared { seat, points, .. } => declared[seat.team()] += points,
+                    Event::Declared { seat, declaration } => {
+                        declared[seat.team()] += declaration.points();
+                    }
                     Event::HandScored { points, .. } => assert_hand_points(*points, declared),
                     _ => {}
                 }
